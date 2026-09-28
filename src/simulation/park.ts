@@ -1,0 +1,79 @@
+export const PARK_SIZE = { columns: 18, rows: 12 } as const;
+
+export type Tile = { column: number; row: number };
+export type BuildingKind =
+  | 'stall'
+  | 'restroom'
+  | 'pavilion'
+  | 'coaster'
+  | 'shooting-gallery'
+  | 'road';
+export type Building = { id: number; tile: Tile; kind: BuildingKind };
+export type Footprint = { columns: number; rows: number };
+export type RoadDirection = 'northwest-southeast' | 'southwest-northeast';
+
+export const BUILDING_FOOTPRINTS: Record<BuildingKind, Footprint> = {
+  stall: { columns: 2, rows: 3 },
+  pavilion: { columns: 2, rows: 2 },
+  restroom: { columns: 1, rows: 1 },
+  coaster: { columns: 3, rows: 2 },
+  'shooting-gallery': { columns: 2, rows: 1 },
+  road: { columns: 1, rows: 1 },
+};
+
+export function getRoadDirection(
+  tile: Tile,
+  buildings: readonly Building[],
+): RoadDirection {
+  const roads = buildings.filter((building) => building.kind === 'road');
+  const columnNeighbors = roads.filter(
+    (road) => road.tile.row === tile.row && Math.abs(road.tile.column - tile.column) === 1,
+  ).length;
+  const rowNeighbors = roads.filter(
+    (road) => road.tile.column === tile.column && Math.abs(road.tile.row - tile.row) === 1,
+  ).length;
+
+  return rowNeighbors > columnNeighbors
+    ? 'southwest-northeast'
+    : 'northwest-southeast';
+}
+
+export class Park {
+  private buildings: Building[] = [];
+  private nextId = 1;
+
+  getBuildings(): readonly Building[] {
+    return this.buildings;
+  }
+
+  canPlace(tile: Tile, kind: BuildingKind): boolean {
+    const footprint = BUILDING_FOOTPRINTS[kind];
+    if (
+      !Number.isInteger(tile.column) ||
+      !Number.isInteger(tile.row) ||
+      tile.column < 0 ||
+      tile.row < 0 ||
+      tile.column + footprint.columns > PARK_SIZE.columns ||
+      tile.row + footprint.rows > PARK_SIZE.rows
+    ) {
+      return false;
+    }
+
+    return !this.buildings.some((building) => {
+      const occupied = BUILDING_FOOTPRINTS[building.kind];
+      return (
+        tile.column < building.tile.column + occupied.columns &&
+        tile.column + footprint.columns > building.tile.column &&
+        tile.row < building.tile.row + occupied.rows &&
+        tile.row + footprint.rows > building.tile.row
+      );
+    });
+  }
+
+  place(tile: Tile, kind: BuildingKind = 'stall'): Building | null {
+    if (!this.canPlace(tile, kind)) return null;
+    const building: Building = { id: this.nextId++, tile: { ...tile }, kind };
+    this.buildings.push(building);
+    return building;
+  }
+}
