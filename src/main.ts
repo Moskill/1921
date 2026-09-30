@@ -13,11 +13,18 @@ const catalog: Record<
   handel: [{ kind: 'pavilion', label: 'Pavillon', icon: '🏛️', size: '2 x 2' }],
   erlebnis: [
     { kind: 'coaster', label: 'Raupenbahn', icon: '🎢', size: '3 x 2' },
-    { kind: 'shooting-gallery', label: 'Schießbude', icon: '🎯', size: '2 x 1' },
+    {
+      kind: 'shooting-gallery',
+      label: 'Schießbude',
+      icon: '🎯',
+      size: '2 x 1',
+    },
   ],
   sonstiges: [
-    { kind: 'restroom', label: 'Toiletten', icon: '🚻', size: '1 x 1' },
+    { kind: 'litter-bin', label: 'Mülleimer', icon: '🗑️', size: '1 x 1' },
+    { kind: 'restroom', label: 'Toilettenhaus', icon: '🚻', size: '1 x 1' },
     { kind: 'road', label: 'Weg gerade', icon: '🛤️', size: '1 x 1' },
+    { kind: 'road-plus', label: 'Befestigter Weg', icon: '🛤️', size: '1 x 1' },
   ],
 };
 
@@ -62,11 +69,13 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <p id="menu-subtitle" class="menu-subtitle">Dein Park wartet auf den ersten Schritt.</p>
         <nav class="main-menu" aria-label="Hauptmenü">
           <button id="new-village" class="menu-button menu-button-primary" type="button">Neues Erlebnisdorf</button>
+          <button id="save-game" class="menu-button" type="button" disabled>Speichern</button>
           <button class="menu-button" type="button" disabled>Erlebnisdörfer</button>
           <button class="menu-button" type="button" disabled>Einstellungen</button>
           <button class="menu-button" type="button" disabled>Credits</button>
           <button id="quit-game" class="menu-button menu-button-quit" type="button">Beenden</button>
         </nav>
+        <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
         <p id="menu-hint" class="menu-hint" hidden>Escape schließt das Menü.</p>
       </div>
       <div id="exit-panel" class="exit-panel" hidden>
@@ -82,7 +91,12 @@ const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   backgroundColor: '#c9dfac',
-  scale: { mode: Phaser.Scale.RESIZE, width: 960, height: 540, autoCenter: Phaser.Scale.CENTER_BOTH },
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    width: 960,
+    height: 540,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
   scene: [ParkScene],
   input: { activePointers: 2 },
 });
@@ -98,25 +112,32 @@ window.addEventListener('park:placed', (event) => {
   if (count) count.textContent = String((event as CustomEvent<number>).detail);
 });
 
-const buildingOptions = document.querySelector<HTMLDivElement>('#building-options')!;
+const buildingOptions =
+  document.querySelector<HTMLDivElement>('#building-options')!;
 let selectedBuilding: BuildingKind | null = 'stall';
 
 function selectBuilding(kind: BuildingKind | null): void {
   selectedBuilding = kind;
-  buildingOptions.querySelectorAll<HTMLButtonElement>('.building-option').forEach((button) => {
-    const selected = button.dataset.building === kind;
-    button.classList.toggle('is-selected', selected);
-    button.setAttribute('aria-pressed', String(selected));
-  });
-  window.dispatchEvent(new CustomEvent('park:select-building', { detail: kind }));
+  buildingOptions
+    .querySelectorAll<HTMLButtonElement>('.building-option')
+    .forEach((button) => {
+      const selected = button.dataset.building === kind;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  window.dispatchEvent(
+    new CustomEvent('park:select-building', { detail: kind }),
+  );
 }
 
 function showCategory(category: BuildingCategory): void {
-  document.querySelectorAll<HTMLButtonElement>('.category-tab').forEach((button) => {
-    const selected = button.dataset.category === category;
-    button.classList.toggle('is-selected', selected);
-    button.setAttribute('aria-pressed', String(selected));
-  });
+  document
+    .querySelectorAll<HTMLButtonElement>('.category-tab')
+    .forEach((button) => {
+      const selected = button.dataset.category === category;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
   buildingOptions.replaceChildren();
   buildingOptions.setAttribute('aria-label', `Gebäude in ${category}`);
   const items = catalog[category];
@@ -150,18 +171,27 @@ function showCategory(category: BuildingCategory): void {
   selectBuilding(selectedBuilding);
 }
 
-document.querySelectorAll<HTMLButtonElement>('.category-tab').forEach((button) => {
-  button.addEventListener('click', () => showCategory(button.dataset.category as BuildingCategory));
-});
+document
+  .querySelectorAll<HTMLButtonElement>('.category-tab')
+  .forEach((button) => {
+    button.addEventListener('click', () =>
+      showCategory(button.dataset.category as BuildingCategory),
+    );
+  });
 showCategory('gastro');
 
 const menuOverlay = document.querySelector<HTMLElement>('#menu-overlay')!;
 const menuPanel = document.querySelector<HTMLDivElement>('#menu-panel')!;
 const menuTitle = document.querySelector<HTMLHeadingElement>('#menu-title')!;
-const menuSubtitle = document.querySelector<HTMLParagraphElement>('#menu-subtitle')!;
+const menuSubtitle =
+  document.querySelector<HTMLParagraphElement>('#menu-subtitle')!;
 const menuHint = document.querySelector<HTMLParagraphElement>('#menu-hint')!;
 const exitPanel = document.querySelector<HTMLDivElement>('#exit-panel')!;
-const newVillageButton = document.querySelector<HTMLButtonElement>('#new-village')!;
+const newVillageButton =
+  document.querySelector<HTMLButtonElement>('#new-village')!;
+const saveGameButton = document.querySelector<HTMLButtonElement>('#save-game')!;
+const saveStatus =
+  document.querySelector<HTMLParagraphElement>('#save-status')!;
 let gameStarted = false;
 
 function openPauseMenu(): void {
@@ -177,18 +207,43 @@ function startNewVillage(): void {
   (game.scene.getScene('ParkScene') as ParkScene).resetPark();
   showCategory('gastro');
   gameStarted = true;
+  saveGameButton.disabled = false;
+  saveStatus.textContent = '';
   menuOverlay.hidden = true;
   menuHint.hidden = true;
 }
 
 newVillageButton.addEventListener('click', startNewVillage);
-document.querySelector<HTMLButtonElement>('#quit-game')!.addEventListener('click', () => {
-  if (!window.confirm('Möchtest du das Erlebnisdorf wirklich beenden?')) return;
-  menuPanel.hidden = true;
-  exitPanel.hidden = false;
-  document.title = 'Erlebnisdorf beendet';
-  window.close();
+saveGameButton.addEventListener('click', () => {
+  if (!gameStarted) return;
+  const snapshot = (
+    game.scene.getScene('ParkScene') as ParkScene
+  ).getSaveSnapshot();
+  try {
+    localStorage.setItem(
+      'erlebnisdorf.manual-save.v1',
+      JSON.stringify(snapshot),
+    );
+    const savedTime = new Date(snapshot.savedAt).toLocaleTimeString('de-DE', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    saveStatus.textContent = `Spielstand gespeichert · ${savedTime}`;
+  } catch {
+    saveStatus.textContent =
+      'Speichern nicht möglich. Prüfe den verfügbaren Browserspeicher.';
+  }
 });
+document
+  .querySelector<HTMLButtonElement>('#quit-game')!
+  .addEventListener('click', () => {
+    if (!window.confirm('Möchtest du das Erlebnisdorf wirklich beenden?'))
+      return;
+    menuPanel.hidden = true;
+    exitPanel.hidden = false;
+    document.title = 'Erlebnisdorf beendet';
+    window.close();
+  });
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || !gameStarted) return;
@@ -200,10 +255,16 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-const avatarButton = document.querySelector<HTMLButtonElement>('#player-image-button')!;
-const avatarInput = document.querySelector<HTMLInputElement>('#player-image-input')!;
+const avatarButton = document.querySelector<HTMLButtonElement>(
+  '#player-image-button',
+)!;
+const avatarInput = document.querySelector<HTMLInputElement>(
+  '#player-image-input',
+)!;
 const avatarImage = document.querySelector<HTMLImageElement>('#player-image')!;
-const avatarStatus = document.querySelector<HTMLSpanElement>('#player-image-status')!;
+const avatarStatus = document.querySelector<HTMLSpanElement>(
+  '#player-image-status',
+)!;
 
 function showPlayerImage(source: string): void {
   avatarImage.src = source;

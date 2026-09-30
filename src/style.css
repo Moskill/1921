@@ -49,6 +49,7 @@ h1 { font-size: clamp(16px, 2.7vw, 25px); line-height: 1.1; margin: 2px 0 0; }
 .menu-button-primary:hover { background: #ffd889 !important; }
 .menu-button:disabled { opacity: 0.48; cursor: not-allowed; }
 .menu-button-quit { margin-top: 5px; border-color: #78554a; color: #f0c0ab; background: #34251f; }
+.save-status { min-height: 16px; margin: 11px 0 0; color: #f9d98f; text-align: center; font-size: 12px; }
 .menu-hint { margin: 16px 0 0; color: #a8b9a3; text-align: center; font-size: 12px; }
 .exit-panel { width: min(100%, 390px); }
 .exit-panel p { margin-bottom: 0; }

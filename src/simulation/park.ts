@@ -1,13 +1,15 @@
-export const PARK_SIZE = { columns: 18, rows: 12 } as const;
+export const PARK_SIZE = { columns: 36, rows: 24 } as const;
 
 export type Tile = { column: number; row: number };
 export type BuildingKind =
   | 'stall'
   | 'restroom'
+  | 'litter-bin'
   | 'pavilion'
   | 'coaster'
   | 'shooting-gallery'
-  | 'road';
+  | 'road'
+  | 'road-plus';
 export type Building = { id: number; tile: Tile; kind: BuildingKind };
 export type Footprint = { columns: number; rows: number };
 export type RoadDirection = 'northwest-southeast' | 'southwest-northeast';
@@ -16,21 +18,79 @@ export const BUILDING_FOOTPRINTS: Record<BuildingKind, Footprint> = {
   stall: { columns: 2, rows: 3 },
   pavilion: { columns: 2, rows: 2 },
   restroom: { columns: 1, rows: 1 },
+  'litter-bin': { columns: 1, rows: 1 },
   coaster: { columns: 3, rows: 2 },
   'shooting-gallery': { columns: 2, rows: 1 },
   road: { columns: 1, rows: 1 },
+  'road-plus': { columns: 1, rows: 1 },
 };
+
+export function isGroundPath(tile: Tile): boolean {
+  return tile.row === 5 || tile.column === 7 || (tile.row === 6 && tile.column < 12);
+}
+
+export function isWalkablePath(
+  tile: Tile,
+  buildings: readonly Building[],
+): boolean {
+  if (
+    tile.column < 0 ||
+    tile.row < 0 ||
+    tile.column >= PARK_SIZE.columns ||
+    tile.row >= PARK_SIZE.rows
+  ) {
+    return false;
+  }
+
+  const road = buildings.some(
+    (building) =>
+      (building.kind === 'road' || building.kind === 'road-plus') &&
+      building.tile.column === tile.column &&
+      building.tile.row === tile.row,
+  );
+  const blockedByBuilding = buildings.some((building) => {
+    if (building.kind === 'road' || building.kind === 'road-plus') return false;
+    const footprint = BUILDING_FOOTPRINTS[building.kind];
+    return (
+      tile.column >= building.tile.column &&
+      tile.column < building.tile.column + footprint.columns &&
+      tile.row >= building.tile.row &&
+      tile.row < building.tile.row + footprint.rows
+    );
+  });
+
+  return !blockedByBuilding && (road || isGroundPath(tile));
+}
+
+export function getPathNeighbors(
+  tile: Tile,
+  buildings: readonly Building[],
+): Tile[] {
+  const candidates = [
+    { column: tile.column + 1, row: tile.row },
+    { column: tile.column, row: tile.row + 1 },
+    { column: tile.column - 1, row: tile.row },
+    { column: tile.column, row: tile.row - 1 },
+  ];
+  return candidates.filter((candidate) => isWalkablePath(candidate, buildings));
+}
 
 export function getRoadDirection(
   tile: Tile,
   buildings: readonly Building[],
 ): RoadDirection {
-  const roads = buildings.filter((building) => building.kind === 'road');
+  const roads = buildings.filter(
+    (building) => building.kind === 'road' || building.kind === 'road-plus',
+  );
   const columnNeighbors = roads.filter(
-    (road) => road.tile.row === tile.row && Math.abs(road.tile.column - tile.column) === 1,
+    (road) =>
+      road.tile.row === tile.row &&
+      Math.abs(road.tile.column - tile.column) === 1,
   ).length;
   const rowNeighbors = roads.filter(
-    (road) => road.tile.column === tile.column && Math.abs(road.tile.row - tile.row) === 1,
+    (road) =>
+      road.tile.column === tile.column &&
+      Math.abs(road.tile.row - tile.row) === 1,
   ).length;
 
   return rowNeighbors > columnNeighbors

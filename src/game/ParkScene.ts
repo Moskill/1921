@@ -1,7 +1,10 @@
 import Phaser from 'phaser';
 import {
   BUILDING_FOOTPRINTS,
+  getPathNeighbors,
   getRoadDirection,
+  isGroundPath,
+  isWalkablePath,
   Park,
   PARK_SIZE,
   type BuildingKind,
@@ -11,11 +14,20 @@ import {
 // A tile is a 96 × 48 diamond, projected from the logical square grid.
 const HALF_W = 48;
 const HALF_H = 24;
+const VISITOR_SHADOW_OFFSET_Y = 4;
 const ORIGIN_X = (PARK_SIZE.rows + 1) * HALF_W;
 const ORIGIN_Y = 125;
 const MAP_WIDTH = (PARK_SIZE.columns + PARK_SIZE.rows + 2) * HALF_W;
 const MAP_HEIGHT = ORIGIN_Y + (PARK_SIZE.columns + PARK_SIZE.rows + 2) * HALF_H;
 type Point = { x: number; y: number };
+
+export type ParkSaveSnapshot = {
+  version: 1;
+  savedAt: string;
+  buildings: { id: number; tile: Tile; kind: BuildingKind }[];
+  selectedBuilding: BuildingKind | null;
+  camera: { scrollX: number; scrollY: number; zoom: number };
+};
 
 function center(tile: Tile): Point {
   return {
@@ -33,6 +45,13 @@ function tileAt(point: Point): Tile {
   };
 }
 
+function visitorFrame(from: Tile, to: Tile): number {
+  if (to.column > from.column) return 0;
+  if (to.row > from.row) return 1;
+  if (to.column < from.column) return 2;
+  return 3;
+}
+
 export class ParkScene extends Phaser.Scene {
   private park = new Park();
   private ground?: Phaser.GameObjects.Graphics;
@@ -41,6 +60,12 @@ export class ParkScene extends Phaser.Scene {
   private props?: Phaser.GameObjects.Graphics;
   private buildings?: Phaser.GameObjects.Graphics;
   private buildingImages?: Phaser.GameObjects.Container;
+  private visitorShadow?: Phaser.GameObjects.Ellipse;
+  private visitor?: Phaser.GameObjects.Sprite;
+  private visitorTile?: Tile;
+  private previousVisitorTile?: Tile;
+  private visitorTween?: Phaser.Tweens.Tween;
+  private visitorRespawn?: Phaser.Time.TimerEvent;
   private hover?: Phaser.GameObjects.Graphics;
   private selectedBuilding: BuildingKind | null = 'stall';
   private dragStart?: {
@@ -59,8 +84,15 @@ export class ParkScene extends Phaser.Scene {
     this.load.image('grass-pattern', '/rasen-1.png');
     this.load.image('coaster', '/raupenbahn-1.webp');
     this.load.image('shooting-gallery', '/schiessbude-1.webp');
+    this.load.image('restroom', '/toilette-1.webp');
+    this.load.image('litter-bin', '/muelleimer-.1.webp');
     this.load.image('straight-road', '/weg-gerade-2.webp');
     this.load.image('straight-road-reverse', '/weg-gerade-3.webp');
+    this.load.image('road-plus', '/weg-1.png');
+    this.load.spritesheet('visitor', '/visitor-1.png', {
+      frameWidth: 64,
+      frameHeight: 96,
+    });
   }
 
   create(): void {
@@ -76,9 +108,18 @@ export class ParkScene extends Phaser.Scene {
     this.props = this.add.graphics();
     this.buildings = this.add.graphics();
     this.buildingImages = this.add.container(0, 0);
+    this.visitorShadow = this.add
+      .ellipse(0, 0, 28, 9, 0x17251b, 0.32)
+      .setVisible(false);
+    this.visitor = this.add
+      .sprite(0, 0, 'visitor', 0)
+      .setOrigin(0.5, 0.9)
+      .setScale(0.4)
+      .setVisible(false);
     this.hover = this.add.graphics();
     this.drawGround();
     this.drawProps();
+    this.scheduleVisitorSpawn();
     window.addEventListener('park:select-building', (event) => {
       this.selectedBuilding = (
         event as CustomEvent<BuildingKind | null>
@@ -140,6 +181,7 @@ export class ParkScene extends Phaser.Scene {
 
   resetPark(): void {
     this.park = new Park();
+    this.resetVisitor();
     this.dragStart = undefined;
     this.moved = false;
     this.cameras.main.setZoom(1);
@@ -148,14 +190,140 @@ export class ParkScene extends Phaser.Scene {
     window.dispatchEvent(new CustomEvent('park:placed', { detail: 0 }));
   }
 
+  getSaveSnapshot(): ParkSaveSnapshot {
+    return {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      buildings: this.park.getBuildings().map((building) => ({
+        ...building,
+        tile: { ...building.tile },
+      })),
+      selectedBuilding: this.selectedBuilding,
+      camera: {
+        scrollX: this.cameras.main.scrollX,
+        scrollY: this.cameras.main.scrollY,
+        zoom: this.cameras.main.zoom,
+      },
+    };
+  }
+
   private place(tile: Tile): void {
     if (!this.selectedBuilding) return;
     if (!this.park.place(tile, this.selectedBuilding)) return;
     this.drawBuildings();
     const count = this.park
       .getBuildings()
-      .filter((building) => building.kind !== 'road').length;
+      .filter(
+        (building) => building.kind !== 'road' && building.kind !== 'road-plus',
+      ).length;
     window.dispatchEvent(new CustomEvent('park:placed', { detail: count }));
+  }
+
+  private scheduleVisitorSpawn(): void {
+    this.visitorRespawn = this.time.delayedCall(
+      Phaser.Math.Between(500, 2500),
+      () => this.spawnVisitor(),
+    );
+  }
+
+  private spawnVisitor(): void {
+    const paths: Tile[] = [];
+    const buildings = this.park.getBuildings();
+    for (let row = 0; row < PARK_SIZE.rows; row++) {
+      for (let column = 0; column < PARK_SIZE.columns; column++) {
+        const tile = { column, row };
+        if (
+          isWalkablePath(tile, buildings) &&
+          getPathNeighbors(tile, buildings).length > 0
+        ) {
+          paths.push(tile);
+        }
+      }
+    }
+
+    if (paths.length === 0 || !this.visitor) {
+      this.scheduleVisitorSpawn();
+      return;
+    }
+
+    this.visitorRespawn = undefined;
+    this.visitorTile = paths[Phaser.Math.Between(0, paths.length - 1)]!;
+    this.previousVisitorTile = undefined;
+    const position = center(this.visitorTile);
+    this.visitorShadow
+      ?.setPosition(position.x, position.y + VISITOR_SHADOW_OFFSET_Y)
+      .setVisible(true);
+    this.visitor
+      .setPosition(position.x, position.y)
+      .setFrame(0)
+      .setVisible(true);
+    this.moveVisitor();
+  }
+
+  private moveVisitor(): void {
+    const current = this.visitorTile;
+    const visitor = this.visitor;
+    if (!current || !visitor) return;
+
+    const neighbors = getPathNeighbors(current, this.park.getBuildings());
+    if (neighbors.length === 0) {
+      this.removeVisitor();
+      return;
+    }
+
+    const atDeadEnd =
+      neighbors.length === 1 &&
+      this.previousVisitorTile !== undefined &&
+      neighbors[0]!.column === this.previousVisitorTile.column &&
+      neighbors[0]!.row === this.previousVisitorTile.row;
+    if (atDeadEnd && Math.random() < 0.45) {
+      this.removeVisitor();
+      return;
+    }
+
+    const forward = neighbors.filter(
+      (tile) =>
+        tile.column !== this.previousVisitorTile?.column ||
+        tile.row !== this.previousVisitorTile?.row,
+    );
+    const choices = forward.length > 0 ? forward : neighbors;
+    const next = choices[Phaser.Math.Between(0, choices.length - 1)]!;
+    const position = center(next);
+    visitor.setFrame(visitorFrame(current, next));
+    this.previousVisitorTile = current;
+    this.visitorTile = next;
+    this.visitorTween = this.tweens.add({
+      targets: visitor,
+      x: position.x,
+      y: position.y,
+      duration: 2200,
+      ease: 'Linear',
+      onUpdate: () =>
+        this.visitorShadow?.setPosition(
+          visitor.x,
+          visitor.y + VISITOR_SHADOW_OFFSET_Y,
+        ),
+      onComplete: () => this.moveVisitor(),
+    });
+  }
+
+  private removeVisitor(): void {
+    this.visitorTween?.stop();
+    this.visitor?.setVisible(false);
+    this.visitorShadow?.setVisible(false);
+    this.visitorTile = undefined;
+    this.previousVisitorTile = undefined;
+    this.scheduleVisitorSpawn();
+  }
+
+  private resetVisitor(): void {
+    this.visitorTween?.stop();
+    this.visitorRespawn?.remove(false);
+    this.visitor?.setVisible(false);
+    this.visitorShadow?.setVisible(false);
+    this.visitorTile = undefined;
+    this.previousVisitorTile = undefined;
+    this.scheduleVisitorSpawn();
   }
 
   private drawGround(): void {
@@ -189,7 +357,7 @@ export class ParkScene extends Phaser.Scene {
     for (let row = 0; row < PARK_SIZE.rows; row++) {
       for (let column = 0; column < PARK_SIZE.columns; column++) {
         const { x, y } = center({ column, row });
-        const path = row === 5 || column === 7 || (row === 6 && column < 12);
+        const path = isGroundPath({ column, row });
         const shade = (column * 17 + row * 31) % grass.length;
         const tileCorners = [
           { x, y: y - HALF_H },
@@ -309,6 +477,22 @@ export class ParkScene extends Phaser.Scene {
         this.buildingImages?.add(image);
         continue;
       }
+      if (building.kind === 'restroom' || building.kind === 'litter-bin') {
+        const image = this.add.image(x, y, building.kind);
+        const width = building.kind === 'restroom' ? HALF_W * 1.8 : HALF_W;
+        image.setScale(width / image.width);
+        image.y -= image.displayHeight / 2 - HALF_H;
+        this.buildingImages?.add(image);
+        continue;
+      }
+      if (building.kind === 'road-plus') {
+        this.buildingImages?.add(
+          this.add
+            .image(x, y, 'road-plus')
+            .setDisplaySize(HALF_W * 2, HALF_H * 2),
+        );
+        continue;
+      }
       if (building.kind === 'road') {
         const roadTexture =
           getRoadDirection(building.tile, ordered) === 'southwest-northeast'
@@ -365,15 +549,15 @@ export class ParkScene extends Phaser.Scene {
         g.strokePoints(roof, true);
         continue;
       }
-      g.fillStyle(building.kind === 'restroom' ? 0xe7dfc8 : 0xf0d5a5);
+      g.fillStyle(0xf0d5a5);
       g.fillPoints([base[0]!, base[1]!, roof[1]!, roof[0]!], true);
-      g.fillStyle(building.kind === 'restroom' ? 0xc7b99a : 0xd0a875);
+      g.fillStyle(0xd0a875);
       g.fillPoints([base[1]!, base[2]!, roof[2]!, roof[1]!], true);
-      g.fillStyle(building.kind === 'restroom' ? 0x517c78 : 0xb94838);
+      g.fillStyle(0xb94838);
       g.fillPoints(roof, true);
-      g.lineStyle(2, building.kind === 'restroom' ? 0x365e59 : 0x8b332c, 0.75);
+      g.lineStyle(2, 0x8b332c, 0.75);
       g.strokePoints(roof, true);
-      g.fillStyle(building.kind === 'restroom' ? 0x527b72 : 0x704b37);
+      g.fillStyle(0x704b37);
       g.fillRect(x - 5, y - 18, 10, 18);
       if (building.kind === 'stall') {
         g.fillStyle(0xf5d577);
