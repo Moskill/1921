@@ -10,6 +10,12 @@ import {
   type BuildingKind,
   type Tile,
 } from '../simulation/park';
+import {
+  BUILDING_ECONOMY,
+  ParkSimulation,
+  type ParkSimulationSave,
+  type ParkSimulationSnapshot,
+} from '../simulation/game';
 
 // A tile is a 96 × 48 diamond, projected from the logical square grid.
 const HALF_W = 48;
@@ -27,6 +33,7 @@ export type ParkSaveSnapshot = {
   buildings: { id: number; tile: Tile; kind: BuildingKind }[];
   selectedBuilding: BuildingKind | null;
   camera: { scrollX: number; scrollY: number; zoom: number };
+  simulation: ParkSimulationSave;
 };
 
 function center(tile: Tile): Point {
@@ -54,6 +61,9 @@ function visitorFrame(from: Tile, to: Tile): number {
 
 export class ParkScene extends Phaser.Scene {
   private park = new Park();
+  private simulation = new ParkSimulation();
+  private simulationEnabled = false;
+  private hudUpdateElapsed = 0;
   private ground?: Phaser.GameObjects.Graphics;
   private groundDetails?: Phaser.GameObjects.Graphics;
   private grassTexture?: Phaser.GameObjects.TileSprite;
@@ -173,6 +183,32 @@ export class ParkScene extends Phaser.Scene {
     );
   }
 
+  update(_time: number, delta: number): void {
+    if (!this.simulationEnabled) return;
+    this.simulation.advance(delta);
+    this.hudUpdateElapsed += delta;
+    if (this.hudUpdateElapsed >= 250) {
+      this.hudUpdateElapsed %= 250;
+      this.dispatchSimulationUpdate();
+    }
+  }
+
+  startGame(): void {
+    this.simulationEnabled = true;
+    if (this.scene.isPaused()) this.scene.resume();
+    this.dispatchSimulationUpdate();
+  }
+
+  pauseGame(): void {
+    this.simulationEnabled = false;
+    this.scene.pause();
+  }
+
+  resumeGame(): void {
+    this.simulationEnabled = true;
+    this.scene.resume();
+  }
+
   zoom(delta: number): void {
     this.cameras.main.setZoom(
       Phaser.Math.Clamp(this.cameras.main.zoom + delta, 0.55, 2),
@@ -181,6 +217,8 @@ export class ParkScene extends Phaser.Scene {
 
   resetPark(): void {
     this.park = new Park();
+    this.simulation.reset();
+    this.updateBuildingEconomy();
     this.resetVisitor();
     this.dragStart = undefined;
     this.moved = false;
@@ -188,6 +226,7 @@ export class ParkScene extends Phaser.Scene {
     this.cameras.main.centerOn(MAP_WIDTH / 2, MAP_HEIGHT / 2);
     this.drawBuildings();
     window.dispatchEvent(new CustomEvent('park:placed', { detail: 0 }));
+    this.dispatchSimulationUpdate();
   }
 
   getSaveSnapshot(): ParkSaveSnapshot {
@@ -204,19 +243,121 @@ export class ParkScene extends Phaser.Scene {
         scrollY: this.cameras.main.scrollY,
         zoom: this.cameras.main.zoom,
       },
+      simulation: this.simulation.getSaveState(),
     };
   }
 
-  private place(tile: Tile): void {
-    if (!this.selectedBuilding) return;
-    if (!this.park.place(tile, this.selectedBuilding)) return;
+  loadSaveSnapshot(snapshot: unknown): boolean {
+    if (!snapshot || typeof snapshot !== 'object') return false;
+    const save = snapshot as Partial<ParkSaveSnapshot>;
+    if (
+      save.version !== 1 ||
+      typeof save.savedAt !== 'string' ||
+      !Array.isArray(save.buildings) ||
+      (save.selectedBuilding !== null &&
+        typeof save.selectedBuilding !== 'string') ||
+      !save.camera ||
+      !save.simulation
+    ) {
+      return false;
+    }
+
+    const validBuildingKinds = Object.keys(BUILDING_FOOTPRINTS);
+    if (
+      (save.selectedBuilding !== null &&
+        !validBuildingKinds.includes(save.selectedBuilding)) ||
+      !Number.isFinite(save.camera.scrollX) ||
+      !Number.isFinite(save.camera.scrollY) ||
+      !Number.isFinite(save.camera.zoom) ||
+      save.camera.zoom < 0.55 ||
+      save.camera.zoom > 2
+    ) {
+      return false;
+    }
+
+    const restoredPark = new Park();
+    const buildings = save.buildings;
+    if (
+      buildings.some(
+        (building) =>
+          !building ||
+          !Number.isInteger(building.id) ||
+          !Number.isInteger(building.tile?.column) ||
+          !Number.isInteger(building.tile?.row) ||
+          !validBuildingKinds.includes(building.kind),
+      ) ||
+      !restoredPark.loadBuildings(buildings)
+    ) {
+      return false;
+    }
+
+    try {
+      const simulation = new ParkSimulation();
+      simulation.loadSaveState(save.simulation);
+    } catch {
+      return false;
+    }
+
+    this.park = restoredPark;
+    this.simulation.loadSaveState(save.simulation);
+    this.selectedBuilding = save.selectedBuilding as BuildingKind | null;
+    this.cameras.main.setZoom(save.camera.zoom);
+    this.cameras.main.setScroll(save.camera.scrollX, save.camera.scrollY);
+    this.hudUpdateElapsed = 0;
+    this.resetVisitor();
     this.drawBuildings();
+    const count = buildings.filter(
+      (building) => building.kind !== 'road' && building.kind !== 'road-plus',
+    ).length;
+    window.dispatchEvent(new CustomEvent('park:placed', { detail: count }));
+    this.dispatchSimulationUpdate();
+    return true;
+  }
+
+  private place(tile: Tile): void {
+    const kind = this.selectedBuilding;
+    if (!kind || !this.park.canPlace(tile, kind)) return;
+    const constructionCost = BUILDING_ECONOMY[kind].constructionCost;
+    if (!this.simulation.trySpend(constructionCost)) {
+      window.dispatchEvent(
+        new CustomEvent('park:insufficient-capital', {
+          detail: { cost: constructionCost },
+        }),
+      );
+      return;
+    }
+    if (!this.park.place(tile, kind)) {
+      this.simulation.adjustMetric('balance', constructionCost);
+      return;
+    }
+    this.drawBuildings();
+    this.updateBuildingEconomy();
     const count = this.park
       .getBuildings()
       .filter(
         (building) => building.kind !== 'road' && building.kind !== 'road-plus',
       ).length;
     window.dispatchEvent(new CustomEvent('park:placed', { detail: count }));
+    this.dispatchSimulationUpdate();
+  }
+
+  private updateBuildingEconomy(): void {
+    const totals = this.park.getBuildings().reduce(
+      (result, building) => {
+        const economy = BUILDING_ECONOMY[building.kind];
+        result.incomePerHour += economy.incomePerHour;
+        result.expensesPerHour += economy.expensesPerHour;
+        return result;
+      },
+      { incomePerHour: 0, expensesPerHour: 0 },
+    );
+    this.simulation.setMetric('incomePerHour', totals.incomePerHour);
+    this.simulation.setMetric('expensesPerHour', totals.expensesPerHour);
+  }
+
+  private dispatchSimulationUpdate(): void {
+    const detail: ParkSimulationSnapshot = this.simulation.getSnapshot();
+    window.dispatchEvent(new CustomEvent('park:simulation-updated', { detail }));
   }
 
   private scheduleVisitorSpawn(): void {
@@ -248,6 +389,7 @@ export class ParkScene extends Phaser.Scene {
 
     this.visitorRespawn = undefined;
     this.visitorTile = paths[Phaser.Math.Between(0, paths.length - 1)]!;
+    this.simulation.setMetric('visitors', 1);
     this.previousVisitorTile = undefined;
     const position = center(this.visitorTile);
     this.visitorShadow
@@ -312,6 +454,7 @@ export class ParkScene extends Phaser.Scene {
     this.visitor?.setVisible(false);
     this.visitorShadow?.setVisible(false);
     this.visitorTile = undefined;
+    this.simulation.setMetric('visitors', 0);
     this.previousVisitorTile = undefined;
     this.scheduleVisitorSpawn();
   }
@@ -322,6 +465,7 @@ export class ParkScene extends Phaser.Scene {
     this.visitor?.setVisible(false);
     this.visitorShadow?.setVisible(false);
     this.visitorTile = undefined;
+    this.simulation.setMetric('visitors', 0);
     this.previousVisitorTile = undefined;
     this.scheduleVisitorSpawn();
   }
