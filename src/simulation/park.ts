@@ -136,4 +136,28 @@ export class Park {
     this.buildings.push(building);
     return building;
   }
+
+  loadBuildings(buildings: readonly Building[]): boolean {
+    const restored = new Park();
+    for (const building of buildings) {
+      if (
+        !Number.isInteger(building.id) ||
+        building.id < 1 ||
+        !(building.kind in BUILDING_FOOTPRINTS) ||
+        !restored.canPlace(building.tile, building.kind) ||
+        restored.buildings.some((existing) => existing.id === building.id)
+      ) {
+        return false;
+      }
+      restored.buildings.push({
+        id: building.id,
+        kind: building.kind,
+        tile: { ...building.tile },
+      });
+    }
+    restored.nextId = Math.max(0, ...restored.buildings.map(({ id }) => id)) + 1;
+    this.buildings = restored.buildings;
+    this.nextId = restored.nextId;
+    return true;
+  }
 }

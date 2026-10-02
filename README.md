@@ -31,6 +31,10 @@ npm run build
 - `src/main.ts` und `src/style.css`: HTML-Oberfläche und Layout
 - `vite.config.ts`: Build und PWA-Manifest
 
-Die PWA speichert die ausgelieferten App-Dateien, aber noch keinen Parkstand. Gebäude, Wirtschaft und Betriebsstörungen sind bislang reine Platzhalter beziehungsweise noch nicht implementiert. Die App erzwingt die Geräteausrichtung nicht auf jedem Browser; im Hochformat erscheint ein Drehhinweis.
+## Wirtschaft anpassen
+
+In `src/simulation/game.ts` enthält `BUILDING_ECONOMY` für jeden Gebäudetyp die Baukosten (`constructionCost`), Einnahmen pro Spielstunde (`incomePerHour`) und laufenden Ausgaben (`expensesPerHour`). Diese Werte steuern sowohl den Baukatalog als auch die Simulation. Das Startkapital lässt sich unter `INITIAL_PARK_METRICS.balance` ändern.
+
+Spielstände werden über das Spielmenü im lokalen Browserspeicher gesichert und können im selben Browserprofil wieder geladen werden. Die PWA speichert außerdem die ausgelieferten App-Dateien. Die App erzwingt die Geräteausrichtung nicht auf jedem Browser; im Hochformat erscheint ein Drehhinweis.
 
 Der Name und die Grafiken sind bewusst neutral gehalten. Vor einer öffentlichen Nutzung von Karls-Marke oder -Assets Rechte und Freigaben klären.

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { ParkScene } from './game/ParkScene';
+import { BUILDING_ECONOMY } from './simulation/game';
 import type { BuildingKind } from './simulation/park';
 import './style.css';
 
@@ -32,7 +33,15 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <main class="shell">
     <header class="topbar">
       <div><span class="eyebrow">PROTOTYP 0.1</span><h1>Mein Erlebnispark</h1></div>
-      <div class="stats"><span>🏠 Gebäude: <strong id="count">0</strong></span><span>🎟️ Tag 1</span></div>
+      <div class="stats" aria-live="polite">
+        <span><small>Spielzeit</small><strong id="game-clock">Tag 1 · 08:00</strong></span>
+        <span><small>Besucher</small><strong id="visitors">0</strong></span>
+        <span><small>Einnahmen / h</small><strong id="income-per-hour">0 €</strong></span>
+        <span><small>Kapital</small><strong id="balance">10.000 €</strong></span>
+        <span><small>Ausgaben / h</small><strong id="expenses-per-hour">0 €</strong></span>
+        <span><small>Zufriedenheit</small><strong id="satisfaction">75 %</strong></span>
+        <span><small>Gebäude</small><strong id="count">0</strong></span>
+      </div>
     </header>
     <section class="play-area" aria-label="Parkkarte">
       <div id="game"></div>
@@ -59,7 +68,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
         <div id="building-options" class="building-options" role="group" aria-label="Gebäude in Gastro"></div>
       </section>
-      <span class="build-hint">Karte antippen zum Platzieren</span>
+      <span id="build-hint" class="build-hint" role="status" aria-live="polite">Karte antippen zum Platzieren</span>
     </footer>
     <div class="rotate" role="status">Bitte drehe dein Smartphone ins Querformat ↻</div>
     <section id="menu-overlay" class="menu-overlay" data-mode="welcome" role="dialog" aria-modal="true" aria-labelledby="menu-title">
@@ -69,6 +78,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <p id="menu-subtitle" class="menu-subtitle">Dein Park wartet auf den ersten Schritt.</p>
         <nav class="main-menu" aria-label="Hauptmenü">
           <button id="new-village" class="menu-button menu-button-primary" type="button">Neues Erlebnisdorf</button>
+          <button id="load-game" class="menu-button" type="button" disabled>Laden</button>
           <button id="save-game" class="menu-button" type="button" disabled>Speichern</button>
           <button class="menu-button" type="button" disabled>Erlebnisdörfer</button>
           <button class="menu-button" type="button" disabled>Einstellungen</button>
@@ -111,6 +121,21 @@ window.addEventListener('park:placed', (event) => {
   const count = document.querySelector('#count');
   if (count) count.textContent = String((event as CustomEvent<number>).detail);
 });
+window.addEventListener('park:simulation-updated', (event) => {
+  const { day, time, metrics } = (
+    event as CustomEvent<{
+      day: number;
+      time: string;
+      metrics: Record<string, number>;
+    }>
+  ).detail;
+  document.querySelector('#game-clock')!.textContent = `Tag ${day} · ${time}`;
+  document.querySelector('#visitors')!.textContent = String(metrics.visitors);
+  document.querySelector('#income-per-hour')!.textContent = `${Math.round(metrics.incomePerHour!).toLocaleString('de-DE')} €`;
+  document.querySelector('#balance')!.textContent = `${Math.round(metrics.balance!).toLocaleString('de-DE')} €`;
+  document.querySelector('#expenses-per-hour')!.textContent = `${Math.round(metrics.expensesPerHour!).toLocaleString('de-DE')} €`;
+  document.querySelector('#satisfaction')!.textContent = `${Math.round(metrics.satisfaction!)} %`;
+});
 
 const buildingOptions =
   document.querySelector<HTMLDivElement>('#building-options')!;
@@ -149,9 +174,13 @@ function showCategory(category: BuildingCategory): void {
     button.className = 'building-option';
     button.type = 'button';
     button.dataset.building = item.kind;
-    button.setAttribute('aria-label', `${item.label}, ${item.size} Felder`);
+    const constructionCost = BUILDING_ECONOMY[item.kind].constructionCost;
+    button.setAttribute(
+      'aria-label',
+      `${item.label}, ${item.size} Felder, ${constructionCost.toLocaleString('de-DE')} Euro Baukosten`,
+    );
     button.setAttribute('aria-pressed', String(item.kind === selectedBuilding));
-    button.title = `${item.label} · ${item.size} Felder`;
+    button.title = `${item.label} · ${item.size} Felder · ${constructionCost.toLocaleString('de-DE')} €`;
     if (item.kind === selectedBuilding) button.classList.add('is-selected');
 
     const icon = document.createElement('span');
@@ -164,7 +193,10 @@ function showCategory(category: BuildingCategory): void {
     const size = document.createElement('span');
     size.className = 'building-size';
     size.textContent = item.size;
-    button.append(icon, label, size);
+    const cost = document.createElement('span');
+    cost.className = 'building-cost';
+    cost.textContent = `${constructionCost.toLocaleString('de-DE')} €`;
+    button.append(icon, label, size, cost);
     button.addEventListener('click', () => selectBuilding(item.kind));
     buildingOptions.append(button);
   }
@@ -180,6 +212,15 @@ document
   });
 showCategory('gastro');
 
+window.addEventListener('park:insufficient-capital', (event) => {
+  const { cost } = (event as CustomEvent<{ cost: number }>).detail;
+  const buildHint = document.querySelector<HTMLSpanElement>('#build-hint')!;
+  buildHint.textContent = `Nicht genug Kapital · benötigt ${cost.toLocaleString('de-DE')} €`;
+  window.setTimeout(() => {
+    buildHint.textContent = 'Karte antippen zum Platzieren';
+  }, 2500);
+});
+
 const menuOverlay = document.querySelector<HTMLElement>('#menu-overlay')!;
 const menuPanel = document.querySelector<HTMLDivElement>('#menu-panel')!;
 const menuTitle = document.querySelector<HTMLHeadingElement>('#menu-title')!;
@@ -190,11 +231,19 @@ const exitPanel = document.querySelector<HTMLDivElement>('#exit-panel')!;
 const newVillageButton =
   document.querySelector<HTMLButtonElement>('#new-village')!;
 const saveGameButton = document.querySelector<HTMLButtonElement>('#save-game')!;
+const loadGameButton = document.querySelector<HTMLButtonElement>('#load-game')!;
 const saveStatus =
   document.querySelector<HTMLParagraphElement>('#save-status')!;
 let gameStarted = false;
 
+try {
+  loadGameButton.disabled = !localStorage.getItem('erlebnisdorf.manual-save.v1');
+} catch {
+  loadGameButton.disabled = true;
+}
+
 function openPauseMenu(): void {
+  (game.scene.getScene('ParkScene') as ParkScene).pauseGame();
   menuOverlay.dataset.mode = 'pause';
   menuTitle.textContent = 'Spielmenü';
   menuSubtitle.textContent = 'Dein Erlebnisdorf ist pausiert.';
@@ -204,7 +253,9 @@ function openPauseMenu(): void {
 }
 
 function startNewVillage(): void {
-  (game.scene.getScene('ParkScene') as ParkScene).resetPark();
+  const scene = game.scene.getScene('ParkScene') as ParkScene;
+  scene.resetPark();
+  scene.startGame();
   showCategory('gastro');
   gameStarted = true;
   saveGameButton.disabled = false;
@@ -229,9 +280,53 @@ saveGameButton.addEventListener('click', () => {
       minute: '2-digit',
     });
     saveStatus.textContent = `Spielstand gespeichert · ${savedTime}`;
+    loadGameButton.disabled = false;
   } catch {
     saveStatus.textContent =
       'Speichern nicht möglich. Prüfe den verfügbaren Browserspeicher.';
+  }
+});
+loadGameButton.addEventListener('click', () => {
+  let rawSave: string | null;
+  try {
+    rawSave = localStorage.getItem('erlebnisdorf.manual-save.v1');
+  } catch {
+    saveStatus.textContent = 'Der Spielstand kann nicht gelesen werden.';
+    return;
+  }
+  if (!rawSave) {
+    loadGameButton.disabled = true;
+    saveStatus.textContent = 'Es wurde kein gespeicherter Spielstand gefunden.';
+    return;
+  }
+
+  try {
+    const snapshot: unknown = JSON.parse(rawSave);
+    const scene = game.scene.getScene('ParkScene') as ParkScene;
+    if (!scene.loadSaveSnapshot(snapshot)) {
+      saveStatus.textContent =
+        'Der Spielstand ist beschädigt oder stammt aus einer inkompatiblen Version.';
+      return;
+    }
+    const selectedBuilding = scene.getSaveSnapshot().selectedBuilding;
+    const category = Object.entries(catalog).find(([, items]) =>
+      items.some((item) => item.kind === selectedBuilding),
+    )?.[0] as BuildingCategory | undefined;
+    if (selectedBuilding) {
+      selectBuilding(selectedBuilding);
+      showCategory(category ?? 'gastro');
+    } else {
+      showCategory('gastro');
+      selectBuilding(null);
+    }
+    scene.startGame();
+    gameStarted = true;
+    saveGameButton.disabled = false;
+    saveStatus.textContent = 'Spielstand geladen.';
+    menuOverlay.hidden = true;
+    menuHint.hidden = true;
+  } catch {
+    saveStatus.textContent = 'Der Spielstand konnte nicht geladen werden.';
   }
 });
 document
@@ -252,6 +347,7 @@ document.addEventListener('keydown', (event) => {
   else {
     menuOverlay.hidden = true;
     menuHint.hidden = true;
+    (game.scene.getScene('ParkScene') as ParkScene).resumeGame();
   }
 });
 

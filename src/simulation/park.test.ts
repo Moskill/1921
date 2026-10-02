@@ -68,4 +68,15 @@ describe('Park', () => {
     park.place({ column: 4, row: 6 }, 'road');
     expect(getRoadDirection(firstRoad.tile, park.getBuildings())).toBe('southwest-northeast');
   });
+
+  it('restores buildings with their saved IDs and continues the ID sequence', () => {
+    const park = new Park();
+    expect(
+      park.loadBuildings([
+        { id: 4, kind: 'pavilion', tile: { column: 3, row: 4 } },
+      ]),
+    ).toBe(true);
+
+    expect(park.place({ column: 8, row: 4 })).toMatchObject({ id: 5 });
+  });
 });
