@@ -31,6 +31,7 @@ export type ParkSaveSnapshot = {
   version: 1;
   savedAt: string;
   buildings: { id: number; tile: Tile; kind: BuildingKind }[];
+  fieldBuildings?: { id: number; tile: Tile; kind: BuildingKind }[];
   selectedBuilding: BuildingKind | null;
   camera: { scrollX: number; scrollY: number; zoom: number };
   simulation: ParkSimulationSave;
@@ -61,6 +62,8 @@ function visitorFrame(from: Tile, to: Tile): number {
 
 export class ParkScene extends Phaser.Scene {
   private park = new Park();
+  private strawberryFields = new Park();
+  private currentMap: 'park' | 'strawberry-fields' = 'park';
   private simulation = new ParkSimulation();
   private simulationEnabled = false;
   private hudUpdateElapsed = 0;
@@ -85,6 +88,10 @@ export class ParkScene extends Phaser.Scene {
     cameraY: number;
   };
   private moved = false;
+
+  private get activePark(): Park {
+    return this.currentMap === 'park' ? this.park : this.strawberryFields;
+  }
 
   constructor() {
     super('ParkScene');
@@ -215,8 +222,28 @@ export class ParkScene extends Phaser.Scene {
     );
   }
 
+  setMap(map: 'park' | 'strawberry-fields'): void {
+    if (map === this.currentMap) return;
+    this.currentMap = map;
+    this.dragStart = undefined;
+    this.moved = false;
+    this.cameras.main.setZoom(1);
+    this.cameras.main.centerOn(MAP_WIDTH / 2, MAP_HEIGHT / 2);
+    this.resetVisitor();
+    this.drawGround();
+    this.drawProps();
+    this.drawBuildings();
+    this.updateBuildingEconomy();
+    window.dispatchEvent(
+      new CustomEvent('park:placed', { detail: this.getBuildingCount() }),
+    );
+    this.dispatchSimulationUpdate();
+  }
+
   resetPark(): void {
     this.park = new Park();
+    this.strawberryFields = new Park();
+    this.currentMap = 'park';
     this.simulation.reset();
     this.updateBuildingEconomy();
     this.resetVisitor();
@@ -224,6 +251,8 @@ export class ParkScene extends Phaser.Scene {
     this.moved = false;
     this.cameras.main.setZoom(1);
     this.cameras.main.centerOn(MAP_WIDTH / 2, MAP_HEIGHT / 2);
+    this.drawGround();
+    this.drawProps();
     this.drawBuildings();
     window.dispatchEvent(new CustomEvent('park:placed', { detail: 0 }));
     this.dispatchSimulationUpdate();
@@ -234,6 +263,10 @@ export class ParkScene extends Phaser.Scene {
       version: 1,
       savedAt: new Date().toISOString(),
       buildings: this.park.getBuildings().map((building) => ({
+        ...building,
+        tile: { ...building.tile },
+      })),
+      fieldBuildings: this.strawberryFields.getBuildings().map((building) => ({
         ...building,
         tile: { ...building.tile },
       })),
@@ -276,17 +309,21 @@ export class ParkScene extends Phaser.Scene {
     }
 
     const restoredPark = new Park();
+    const restoredFields = new Park();
     const buildings = save.buildings;
+    const fieldBuildings = save.fieldBuildings ?? [];
+    const invalidBuilding = (building: (typeof buildings)[number]) =>
+      !building ||
+      !Number.isInteger(building.id) ||
+      !Number.isInteger(building.tile?.column) ||
+      !Number.isInteger(building.tile?.row) ||
+      !validBuildingKinds.includes(building.kind);
     if (
-      buildings.some(
-        (building) =>
-          !building ||
-          !Number.isInteger(building.id) ||
-          !Number.isInteger(building.tile?.column) ||
-          !Number.isInteger(building.tile?.row) ||
-          !validBuildingKinds.includes(building.kind),
-      ) ||
-      !restoredPark.loadBuildings(buildings)
+      !Array.isArray(fieldBuildings) ||
+      buildings.some(invalidBuilding) ||
+      fieldBuildings.some(invalidBuilding) ||
+      !restoredPark.loadBuildings(buildings) ||
+      !restoredFields.loadBuildings(fieldBuildings)
     ) {
       return false;
     }
@@ -299,14 +336,18 @@ export class ParkScene extends Phaser.Scene {
     }
 
     this.park = restoredPark;
+    this.strawberryFields = restoredFields;
+    this.currentMap = 'park';
     this.simulation.loadSaveState(save.simulation);
     this.selectedBuilding = save.selectedBuilding as BuildingKind | null;
     this.cameras.main.setZoom(save.camera.zoom);
     this.cameras.main.setScroll(save.camera.scrollX, save.camera.scrollY);
     this.hudUpdateElapsed = 0;
     this.resetVisitor();
+    this.drawGround();
+    this.drawProps();
     this.drawBuildings();
-    const count = buildings.filter(
+    const count = [...buildings, ...fieldBuildings].filter(
       (building) => building.kind !== 'road' && building.kind !== 'road-plus',
     ).length;
     window.dispatchEvent(new CustomEvent('park:placed', { detail: count }));
@@ -316,7 +357,7 @@ export class ParkScene extends Phaser.Scene {
 
   private place(tile: Tile): void {
     const kind = this.selectedBuilding;
-    if (!kind || !this.park.canPlace(tile, kind)) return;
+    if (!kind || !this.activePark.canPlace(tile, kind)) return;
     const constructionCost = BUILDING_ECONOMY[kind].constructionCost;
     if (!this.simulation.trySpend(constructionCost)) {
       window.dispatchEvent(
@@ -326,14 +367,13 @@ export class ParkScene extends Phaser.Scene {
       );
       return;
     }
-    if (!this.park.place(tile, kind)) {
+    if (!this.activePark.place(tile, kind)) {
       this.simulation.adjustMetric('balance', constructionCost);
       return;
     }
     this.drawBuildings();
     this.updateBuildingEconomy();
-    const count = this.park
-      .getBuildings()
+    const count = [...this.park.getBuildings(), ...this.strawberryFields.getBuildings()]
       .filter(
         (building) => building.kind !== 'road' && building.kind !== 'road-plus',
       ).length;
@@ -342,7 +382,7 @@ export class ParkScene extends Phaser.Scene {
   }
 
   private updateBuildingEconomy(): void {
-    const totals = this.park.getBuildings().reduce(
+    const totals = [...this.park.getBuildings(), ...this.strawberryFields.getBuildings()].reduce(
       (result, building) => {
         const economy = BUILDING_ECONOMY[building.kind];
         result.incomePerHour += economy.incomePerHour;
@@ -355,12 +395,19 @@ export class ParkScene extends Phaser.Scene {
     this.simulation.setMetric('expensesPerHour', totals.expensesPerHour);
   }
 
+  private getBuildingCount(): number {
+    return [...this.park.getBuildings(), ...this.strawberryFields.getBuildings()].filter(
+      (building) => building.kind !== 'road' && building.kind !== 'road-plus',
+    ).length;
+  }
+
   private dispatchSimulationUpdate(): void {
     const detail: ParkSimulationSnapshot = this.simulation.getSnapshot();
     window.dispatchEvent(new CustomEvent('park:simulation-updated', { detail }));
   }
 
   private scheduleVisitorSpawn(): void {
+    if (this.currentMap !== 'park') return;
     this.visitorRespawn = this.time.delayedCall(
       Phaser.Math.Between(500, 2500),
       () => this.spawnVisitor(),
@@ -368,6 +415,7 @@ export class ParkScene extends Phaser.Scene {
   }
 
   private spawnVisitor(): void {
+    if (this.currentMap !== 'park') return;
     const paths: Tile[] = [];
     const buildings = this.park.getBuildings();
     for (let row = 0; row < PARK_SIZE.rows; row++) {
@@ -473,6 +521,10 @@ export class ParkScene extends Phaser.Scene {
   private drawGround(): void {
     const g = this.ground;
     if (!g) return;
+    g.clear();
+    this.groundDetails?.clear();
+    this.grassTexture?.clearMask(true);
+    const fieldMap = this.currentMap === 'strawberry-fields';
     const corners = [
       { x: ORIGIN_X, y: ORIGIN_Y },
       {
@@ -501,7 +553,7 @@ export class ParkScene extends Phaser.Scene {
     for (let row = 0; row < PARK_SIZE.rows; row++) {
       for (let column = 0; column < PARK_SIZE.columns; column++) {
         const { x, y } = center({ column, row });
-        const path = isGroundPath({ column, row });
+        const path = !fieldMap && isGroundPath({ column, row });
         const shade = (column * 17 + row * 31) % grass.length;
         const tileCorners = [
           { x, y: y - HALF_H },
@@ -516,9 +568,13 @@ export class ParkScene extends Phaser.Scene {
           grassMask.fillStyle(0xffffff);
           grassMask.fillPoints(tileCorners, true);
         }
-        details?.lineStyle(1, path ? 0xb2a783 : 0x79a25f, 0.25);
+        details?.lineStyle(
+          1,
+          path ? 0xb2a783 : fieldMap ? 0xa6c77f : 0x79a25f,
+          fieldMap ? 0.55 : 0.25,
+        );
         details?.strokePoints(tileCorners, true);
-        if (!path && (column * 13 + row * 7) % 11 === 0) {
+        if (!fieldMap && !path && (column * 13 + row * 7) % 11 === 0) {
           details?.fillStyle(0xf5e7ad, 0.85);
           details?.fillCircle(x - 12, y + 3, 2);
           details?.fillCircle(x + 3, y + 10, 2);
@@ -531,6 +587,8 @@ export class ParkScene extends Phaser.Scene {
   private drawProps(): void {
     const g = this.props;
     if (!g) return;
+    g.clear();
+    if (this.currentMap === 'strawberry-fields') return;
     const trees: Tile[] = [
       { column: 2, row: 2 },
       { column: 4, row: 1 },
@@ -562,7 +620,7 @@ export class ParkScene extends Phaser.Scene {
     g.clear();
     if (!this.selectedBuilding) return;
     const footprint = BUILDING_FOOTPRINTS[this.selectedBuilding];
-    const canPlace = this.park.canPlace(tile, this.selectedBuilding);
+    const canPlace = this.activePark.canPlace(tile, this.selectedBuilding);
     g.fillStyle(canPlace ? 0xf9eac2 : 0xe98266, 0.42);
     g.lineStyle(2, canPlace ? 0xfff3ce : 0xffad91, 0.95);
     for (let row = 0; row < footprint.rows; row++) {
@@ -593,7 +651,7 @@ export class ParkScene extends Phaser.Scene {
     if (!g) return;
     g.clear();
     this.buildingImages?.removeAll(true);
-    const ordered = [...this.park.getBuildings()].sort(
+    const ordered = [...this.activePark.getBuildings()].sort(
       (a, b) => a.tile.column + a.tile.row - b.tile.column - b.tile.row,
     );
     for (const building of ordered) {

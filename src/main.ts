@@ -68,6 +68,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
         <div id="building-options" class="building-options" role="group" aria-label="Gebäude in Gastro"></div>
       </section>
+      <button id="map-switcher" class="map-switcher" type="button" aria-label="Erdbeerfelder öffnen" aria-pressed="false" disabled>🍓 Erdbeerfelder</button>
       <span id="build-hint" class="build-hint" role="status" aria-live="polite">Karte antippen zum Platzieren</span>
     </footer>
     <div class="rotate" role="status">Bitte drehe dein Smartphone ins Querformat ↻</div>
@@ -139,7 +140,24 @@ window.addEventListener('park:simulation-updated', (event) => {
 
 const buildingOptions =
   document.querySelector<HTMLDivElement>('#building-options')!;
+const mapSwitcher = document.querySelector<HTMLButtonElement>('#map-switcher')!;
+const playArea = document.querySelector<HTMLElement>('.play-area')!;
 let selectedBuilding: BuildingKind | null = 'stall';
+let currentMap: 'park' | 'strawberry-fields' = 'park';
+
+function switchMap(map: 'park' | 'strawberry-fields'): void {
+  currentMap = map;
+  (game.scene.getScene('ParkScene') as ParkScene).setMap(map);
+  const onFields = map === 'strawberry-fields';
+  mapSwitcher.textContent = onFields ? 'Zurück zum Park' : '🍓 Erdbeerfelder';
+  mapSwitcher.setAttribute('aria-label', onFields ? 'Zurück zum Park' : 'Erdbeerfelder öffnen');
+  mapSwitcher.setAttribute('aria-pressed', String(onFields));
+  playArea.setAttribute('aria-label', onFields ? 'Erdbeerfelder' : 'Parkkarte');
+}
+
+mapSwitcher.addEventListener('click', () => {
+  switchMap(currentMap === 'park' ? 'strawberry-fields' : 'park');
+});
 
 function selectBuilding(kind: BuildingKind | null): void {
   selectedBuilding = kind;
@@ -253,11 +271,13 @@ function openPauseMenu(): void {
 }
 
 function startNewVillage(): void {
+  switchMap('park');
   const scene = game.scene.getScene('ParkScene') as ParkScene;
   scene.resetPark();
   scene.startGame();
   showCategory('gastro');
   gameStarted = true;
+  mapSwitcher.disabled = false;
   saveGameButton.disabled = false;
   saveStatus.textContent = '';
   menuOverlay.hidden = true;
@@ -308,6 +328,7 @@ loadGameButton.addEventListener('click', () => {
         'Der Spielstand ist beschädigt oder stammt aus einer inkompatiblen Version.';
       return;
     }
+    switchMap('park');
     const selectedBuilding = scene.getSaveSnapshot().selectedBuilding;
     const category = Object.entries(catalog).find(([, items]) =>
       items.some((item) => item.kind === selectedBuilding),
@@ -321,6 +342,7 @@ loadGameButton.addEventListener('click', () => {
     }
     scene.startGame();
     gameStarted = true;
+    mapSwitcher.disabled = false;
     saveGameButton.disabled = false;
     saveStatus.textContent = 'Spielstand geladen.';
     menuOverlay.hidden = true;
