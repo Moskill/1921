@@ -47,6 +47,17 @@ describe('Park', () => {
     expect(park.place({ column: 35, row: 0 }, 'shooting-gallery')).toBeNull();
   });
 
+  it('places the tool shed, barn, and strawberry field footprints', () => {
+    const park = new Park();
+
+    expect(park.place({ column: 0, row: 0 }, 'tool-shed')).not.toBeNull();
+    expect(park.place({ column: 2, row: 0 }, 'barn')).not.toBeNull();
+    expect(
+      park.place({ column: 5, row: 0 }, 'strawberry-field'),
+    ).not.toBeNull();
+    expect(park.place({ column: 7, row: 2 }, 'restroom')).toBeNull();
+  });
+
   it('allows visitors only on open built-in and placed paths', () => {
     const road = { id: 1, tile: { column: 20, row: 20 }, kind: 'road-plus' as const };
     expect(isWalkablePath({ column: 0, row: 5 }, [])).toBe(true);
@@ -67,5 +78,16 @@ describe('Park', () => {
     expect(getRoadDirection(firstRoad.tile, park.getBuildings())).toBe('northwest-southeast');
     park.place({ column: 4, row: 6 }, 'road');
     expect(getRoadDirection(firstRoad.tile, park.getBuildings())).toBe('southwest-northeast');
+  });
+
+  it('restores buildings with their saved IDs and continues the ID sequence', () => {
+    const park = new Park();
+    expect(
+      park.loadBuildings([
+        { id: 4, kind: 'pavilion', tile: { column: 3, row: 4 } },
+      ]),
+    ).toBe(true);
+
+    expect(park.place({ column: 8, row: 4 })).toMatchObject({ id: 5 });
   });
 });

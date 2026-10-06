@@ -8,6 +8,9 @@ export type BuildingKind =
   | 'pavilion'
   | 'coaster'
   | 'shooting-gallery'
+  | 'tool-shed'
+  | 'barn'
+  | 'strawberry-field'
   | 'road'
   | 'road-plus';
 export type Building = { id: number; tile: Tile; kind: BuildingKind };
@@ -21,6 +24,9 @@ export const BUILDING_FOOTPRINTS: Record<BuildingKind, Footprint> = {
   'litter-bin': { columns: 1, rows: 1 },
   coaster: { columns: 3, rows: 2 },
   'shooting-gallery': { columns: 2, rows: 1 },
+  'tool-shed': { columns: 2, rows: 2 },
+  barn: { columns: 3, rows: 2 },
+  'strawberry-field': { columns: 3, rows: 3 },
   road: { columns: 1, rows: 1 },
   'road-plus': { columns: 1, rows: 1 },
 };
@@ -135,5 +141,29 @@ export class Park {
     const building: Building = { id: this.nextId++, tile: { ...tile }, kind };
     this.buildings.push(building);
     return building;
+  }
+
+  loadBuildings(buildings: readonly Building[]): boolean {
+    const restored = new Park();
+    for (const building of buildings) {
+      if (
+        !Number.isInteger(building.id) ||
+        building.id < 1 ||
+        !(building.kind in BUILDING_FOOTPRINTS) ||
+        !restored.canPlace(building.tile, building.kind) ||
+        restored.buildings.some((existing) => existing.id === building.id)
+      ) {
+        return false;
+      }
+      restored.buildings.push({
+        id: building.id,
+        kind: building.kind,
+        tile: { ...building.tile },
+      });
+    }
+    restored.nextId = Math.max(0, ...restored.buildings.map(({ id }) => id)) + 1;
+    this.buildings = restored.buildings;
+    this.nextId = restored.nextId;
+    return true;
   }
 }
