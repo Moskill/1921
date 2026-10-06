@@ -47,6 +47,17 @@ describe('Park', () => {
     expect(park.place({ column: 35, row: 0 }, 'shooting-gallery')).toBeNull();
   });
 
+  it('places the tool shed, barn, and strawberry field footprints', () => {
+    const park = new Park();
+
+    expect(park.place({ column: 0, row: 0 }, 'tool-shed')).not.toBeNull();
+    expect(park.place({ column: 2, row: 0 }, 'barn')).not.toBeNull();
+    expect(
+      park.place({ column: 5, row: 0 }, 'strawberry-field'),
+    ).not.toBeNull();
+    expect(park.place({ column: 7, row: 2 }, 'restroom')).toBeNull();
+  });
+
   it('allows visitors only on open built-in and placed paths', () => {
     const road = { id: 1, tile: { column: 20, row: 20 }, kind: 'road-plus' as const };
     expect(isWalkablePath({ column: 0, row: 5 }, [])).toBe(true);

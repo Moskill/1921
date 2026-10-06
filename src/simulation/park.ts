@@ -8,6 +8,9 @@ export type BuildingKind =
   | 'pavilion'
   | 'coaster'
   | 'shooting-gallery'
+  | 'tool-shed'
+  | 'barn'
+  | 'strawberry-field'
   | 'road'
   | 'road-plus';
 export type Building = { id: number; tile: Tile; kind: BuildingKind };
@@ -21,6 +24,9 @@ export const BUILDING_FOOTPRINTS: Record<BuildingKind, Footprint> = {
   'litter-bin': { columns: 1, rows: 1 },
   coaster: { columns: 3, rows: 2 },
   'shooting-gallery': { columns: 2, rows: 1 },
+  'tool-shed': { columns: 2, rows: 2 },
+  barn: { columns: 3, rows: 2 },
+  'strawberry-field': { columns: 3, rows: 3 },
   road: { columns: 1, rows: 1 },
   'road-plus': { columns: 1, rows: 1 },
 };

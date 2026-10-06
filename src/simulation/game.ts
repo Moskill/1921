@@ -1,11 +1,34 @@
 import type { BuildingKind } from './park';
 
+export const STARTING_YEAR = 1921;
+export const STARTING_BALANCE = 1_000;
+export const STRAWBERRY_FIELDS_LAND_COST = 500;
+
+export const BUILDING_UNLOCK_YEARS: Record<BuildingKind, number> = {
+  stall: 1922,
+  pavilion: 1922,
+  restroom: 1922,
+  'litter-bin': 1922,
+  coaster: 1922,
+  'shooting-gallery': 1922,
+  'tool-shed': STARTING_YEAR,
+  barn: STARTING_YEAR,
+  'strawberry-field': STARTING_YEAR,
+  road: STARTING_YEAR,
+  'road-plus': 1922,
+};
+
+export function isBuildingUnlocked(kind: BuildingKind, year: number): boolean {
+  return year >= BUILDING_UNLOCK_YEARS[kind];
+}
+
 export const INITIAL_PARK_METRICS = {
   visitors: 0,
   incomePerHour: 0,
-  balance: 10_000,
+  balance: STARTING_BALANCE,
   expensesPerHour: 0,
   satisfaction: 75,
+  employees: 0,
 } as const;
 
 export const BUILDING_ECONOMY: Record<
@@ -22,6 +45,13 @@ export const BUILDING_ECONOMY: Record<
     incomePerHour: 220,
     expensesPerHour: 80,
   },
+  'tool-shed': { constructionCost: 400, incomePerHour: 0, expensesPerHour: 0 },
+  barn: { constructionCost: 800, incomePerHour: 0, expensesPerHour: 0 },
+  'strawberry-field': {
+    constructionCost: 300,
+    incomePerHour: 100,
+    expensesPerHour: 20,
+  },
   road: { constructionCost: 100, incomePerHour: 0, expensesPerHour: 0 },
   'road-plus': { constructionCost: 250, incomePerHour: 0, expensesPerHour: 0 },
 };
@@ -29,11 +59,13 @@ export const BUILDING_ECONOMY: Record<
 export type ParkSimulationSnapshot = {
   day: number;
   time: string;
+  year: number;
   metrics: Readonly<Record<string, number>>;
 };
 
 export type ParkSimulationSave = {
   elapsedGameSeconds: number;
+  year?: number;
   metrics: Record<string, number>;
 };
 
@@ -50,6 +82,7 @@ export class ParkSimulation {
   private readonly metrics = new Map<string, number>();
   private readonly systems: ParkSimulationSystem[] = [];
   private elapsedGameSeconds = 0;
+  private year = STARTING_YEAR;
 
   constructor() {
     for (const [id, value] of Object.entries(INITIAL_PARK_METRICS)) {
@@ -125,12 +158,25 @@ export class ParkSimulation {
 
   reset(): void {
     this.elapsedGameSeconds = 0;
+    this.year = STARTING_YEAR;
     for (const [id, value] of this.initialMetrics) this.metrics.set(id, value);
+  }
+
+  getYear(): number {
+    return this.year;
+  }
+
+  setYear(year: number): void {
+    if (!Number.isInteger(year) || year < STARTING_YEAR) {
+      throw new Error(`The park year must be an integer of ${STARTING_YEAR} or later.`);
+    }
+    this.year = year;
   }
 
   getSaveState(): ParkSimulationSave {
     return {
       elapsedGameSeconds: this.elapsedGameSeconds,
+      year: this.year,
       metrics: Object.fromEntries(this.metrics),
     };
   }
@@ -139,17 +185,30 @@ export class ParkSimulation {
     if (!Number.isFinite(save.elapsedGameSeconds) || save.elapsedGameSeconds < 0) {
       throw new Error('Saved game time must be a non-negative finite number.');
     }
+    if (
+      save.year !== undefined &&
+      (!Number.isInteger(save.year) || save.year < STARTING_YEAR)
+    ) {
+      throw new Error(`The saved park year must be an integer of ${STARTING_YEAR} or later.`);
+    }
     for (const [id, value] of Object.entries(save.metrics)) {
       if (!this.metrics.has(id)) {
         throw new Error(`Park metric "${id}" is not registered.`);
       }
       this.assertFiniteValue(value);
     }
-    if (Object.keys(save.metrics).length !== this.metrics.size) {
+    const missingMetrics = [...this.metrics.keys()].filter(
+      (id) => !Object.hasOwn(save.metrics, id),
+    );
+    if (missingMetrics.some((id) => id !== 'employees')) {
       throw new Error('Saved park metrics do not match the registered metrics.');
     }
 
     this.elapsedGameSeconds = save.elapsedGameSeconds;
+    this.year = save.year ?? STARTING_YEAR;
+    if (missingMetrics.includes('employees')) {
+      this.metrics.set('employees', this.initialMetrics.get('employees')!);
+    }
     for (const [id, value] of Object.entries(save.metrics)) {
       this.metrics.set(id, value);
     }
@@ -165,6 +224,7 @@ export class ParkSimulation {
     return {
       day,
       time: `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`,
+      year: this.year,
       metrics: Object.fromEntries(this.metrics),
     };
   }

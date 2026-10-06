@@ -1,31 +1,145 @@
 import Phaser from 'phaser';
 import { ParkScene } from './game/ParkScene';
-import { BUILDING_ECONOMY } from './simulation/game';
+import {
+  BUILDING_ECONOMY,
+  BUILDING_UNLOCK_YEARS,
+  isBuildingUnlocked,
+  STRAWBERRY_FIELDS_LAND_COST,
+  STARTING_YEAR,
+} from './simulation/game';
 import type { BuildingKind } from './simulation/park';
 import './style.css';
 
 type BuildingCategory = 'gastro' | 'handel' | 'erlebnis' | 'sonstiges';
+type CatalogItem = {
+  id: string;
+  kind: BuildingKind | null;
+  label: string;
+  icon: string;
+  size: string;
+  availableFromYear: number;
+  implemented: boolean;
+};
 
 const catalog: Record<
   BuildingCategory,
-  { kind: BuildingKind; label: string; icon: string; size: string }[]
+  CatalogItem[]
 > = {
-  gastro: [{ kind: 'stall', label: 'Marktstand', icon: '🏪', size: '2 x 3' }],
-  handel: [{ kind: 'pavilion', label: 'Pavillon', icon: '🏛️', size: '2 x 2' }],
-  erlebnis: [
-    { kind: 'coaster', label: 'Raupenbahn', icon: '🎢', size: '3 x 2' },
+  gastro: [
     {
+      id: 'farm-shop',
+      kind: null,
+      label: 'Hofladen',
+      icon: '🏡',
+      size: '2 x 3',
+      availableFromYear: STARTING_YEAR,
+      implemented: false,
+    },
+    {
+      id: 'stall',
+      kind: 'stall',
+      label: 'Marktstand',
+      icon: '🏪',
+      size: '2 x 3',
+      availableFromYear: BUILDING_UNLOCK_YEARS.stall,
+      implemented: true,
+    },
+  ],
+  handel: [
+    {
+      id: 'pavilion',
+      kind: 'pavilion',
+      label: 'Pavillon',
+      icon: '🏛️',
+      size: '2 x 2',
+      availableFromYear: BUILDING_UNLOCK_YEARS.pavilion,
+      implemented: true,
+    },
+  ],
+  erlebnis: [
+    {
+      id: 'coaster',
+      kind: 'coaster',
+      label: 'Raupenbahn',
+      icon: '🎢',
+      size: '3 x 2',
+      availableFromYear: BUILDING_UNLOCK_YEARS.coaster,
+      implemented: true,
+    },
+    {
+      id: 'shooting-gallery',
       kind: 'shooting-gallery',
       label: 'Schießbude',
       icon: '🎯',
       size: '2 x 1',
+      availableFromYear: BUILDING_UNLOCK_YEARS['shooting-gallery'],
+      implemented: true,
     },
   ],
   sonstiges: [
-    { kind: 'litter-bin', label: 'Mülleimer', icon: '🗑️', size: '1 x 1' },
-    { kind: 'restroom', label: 'Toilettenhaus', icon: '🚻', size: '1 x 1' },
-    { kind: 'road', label: 'Weg gerade', icon: '🛤️', size: '1 x 1' },
-    { kind: 'road-plus', label: 'Befestigter Weg', icon: '🛤️', size: '1 x 1' },
+    {
+      id: 'strawberry-field',
+      kind: 'strawberry-field',
+      label: 'Erdbeerfeld',
+      icon: '🍓',
+      size: '3 x 3',
+      availableFromYear: STARTING_YEAR,
+      implemented: true,
+    },
+    {
+      id: 'tool-shed',
+      kind: 'tool-shed',
+      label: 'Geräteschuppen',
+      icon: '🛖',
+      size: '2 x 2',
+      availableFromYear: BUILDING_UNLOCK_YEARS['tool-shed'],
+      implemented: true,
+    },
+    {
+      id: 'barn',
+      kind: 'barn',
+      label: 'Scheune',
+      icon: '🛖',
+      size: '3 x 2',
+      availableFromYear: BUILDING_UNLOCK_YEARS.barn,
+      implemented: true,
+    },
+    {
+      id: 'litter-bin',
+      kind: 'litter-bin',
+      label: 'Mülleimer',
+      icon: '🗑️',
+      size: '1 x 1',
+      availableFromYear: BUILDING_UNLOCK_YEARS['litter-bin'],
+      implemented: true,
+    },
+    {
+      id: 'restroom',
+      kind: 'restroom',
+      label: 'Toilettenhaus',
+      icon: '🚻',
+      size: '1 x 1',
+      availableFromYear: BUILDING_UNLOCK_YEARS.restroom,
+      implemented: true,
+    },
+    {
+      id: 'road',
+      kind: 'road',
+      label: 'Weg gerade',
+      icon: '🛤️',
+      size: '1 x 1',
+      availableFromYear: BUILDING_UNLOCK_YEARS.road,
+      implemented: true,
+    },
+    {
+      id: 'road-plus',
+      kind: 'road-plus',
+      label: 'Befestigter Weg',
+      icon: '🛤️',
+      size: '1 x 1',
+      availableFromYear: BUILDING_UNLOCK_YEARS['road-plus'],
+      implemented: true,
+    },
   ],
 };
 
@@ -33,20 +147,31 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <main class="shell">
     <header class="topbar">
       <div><span class="eyebrow">PROTOTYP 0.1</span><h1>Mein Erlebnispark</h1></div>
-      <div class="stats" aria-live="polite">
-        <span><small>Spielzeit</small><strong id="game-clock">Tag 1 · 08:00</strong></span>
-        <span><small>Besucher</small><strong id="visitors">0</strong></span>
-        <span><small>Einnahmen / h</small><strong id="income-per-hour">0 €</strong></span>
-        <span><small>Kapital</small><strong id="balance">10.000 €</strong></span>
-        <span><small>Ausgaben / h</small><strong id="expenses-per-hour">0 €</strong></span>
-        <span><small>Zufriedenheit</small><strong id="satisfaction">75 %</strong></span>
-        <span><small>Gebäude</small><strong id="count">0</strong></span>
+      <div class="header-status">
+        <span id="game-clock">1921 · Tag 1 · 08:00</span>
+        <div class="stats" aria-live="polite">
+          <span><small>Vermögen</small><strong id="balance">1.000 RM</strong></span>
+          <span><small>Einnahmen / h</small><strong id="income-per-hour">0 RM</strong></span>
+          <span><small>Ausgaben / h</small><strong id="expenses-per-hour">0 RM</strong></span>
+          <span><small>Mitarbeiter</small><strong id="employees">0</strong></span>
+        </div>
       </div>
     </header>
     <section class="play-area" aria-label="Parkkarte">
       <div id="game"></div>
       <div class="hint">Tippen: Stand bauen · Ziehen: Karte bewegen</div>
+      <button id="land-arrow" class="land-arrow" type="button" aria-label="Land kaufen öffnen" aria-haspopup="dialog" disabled>↓</button>
       <div class="zoom"><button id="zoom-in" aria-label="Vergrößern">+</button><button id="zoom-out" aria-label="Verkleinern">−</button></div>
+      <section id="land-overlay" class="land-overlay" role="dialog" aria-modal="true" aria-labelledby="land-title" hidden>
+        <div class="land-panel">
+          <button id="land-close" class="land-close" type="button" aria-label="Schließen">×</button>
+          <h2 id="land-title">Land kaufen</h2>
+          <p id="land-description">Kaufe das angrenzende Gelände, um die Erdbeerfelder freizuschalten.</p>
+          <p id="land-message" class="land-message" role="status" aria-live="polite"></p>
+          <button id="land-purchase" class="land-purchase" type="button">Land kaufen · 500 RM</button>
+          <button id="land-open-fields" class="land-purchase" type="button" hidden>Erdbeerfelder öffnen</button>
+        </div>
+      </section>
     </section>
     <footer class="build-hud" aria-label="Parkverwaltung und Bauen">
       <section class="player-profile" aria-label="Spielerbild">
@@ -122,30 +247,44 @@ window.addEventListener('park:placed', (event) => {
   const count = document.querySelector('#count');
   if (count) count.textContent = String((event as CustomEvent<number>).detail);
 });
+function formatMoney(amount: number): string {
+  return `${Math.round(amount).toLocaleString('de-DE')} RM`;
+}
+
 window.addEventListener('park:simulation-updated', (event) => {
-  const { day, time, metrics } = (
+  const { day, time, year, metrics } = (
     event as CustomEvent<{
       day: number;
       time: string;
+      year: number;
       metrics: Record<string, number>;
     }>
   ).detail;
-  document.querySelector('#game-clock')!.textContent = `Tag ${day} · ${time}`;
-  document.querySelector('#visitors')!.textContent = String(metrics.visitors);
-  document.querySelector('#income-per-hour')!.textContent = `${Math.round(metrics.incomePerHour!).toLocaleString('de-DE')} €`;
-  document.querySelector('#balance')!.textContent = `${Math.round(metrics.balance!).toLocaleString('de-DE')} €`;
-  document.querySelector('#expenses-per-hour')!.textContent = `${Math.round(metrics.expensesPerHour!).toLocaleString('de-DE')} €`;
-  document.querySelector('#satisfaction')!.textContent = `${Math.round(metrics.satisfaction!)} %`;
+  document.querySelector('#game-clock')!.textContent =
+    `${year} · Tag ${day} · ${time}`;
+  updateBuildingAvailability(year);
+  document.querySelector('#income-per-hour')!.textContent = formatMoney(metrics.incomePerHour!);
+  document.querySelector('#balance')!.textContent = formatMoney(metrics.balance!);
+  document.querySelector('#expenses-per-hour')!.textContent = formatMoney(metrics.expensesPerHour!);
+  document.querySelector('#employees')!.textContent = String(metrics.employees);
 });
 
 const buildingOptions =
   document.querySelector<HTMLDivElement>('#building-options')!;
 const mapSwitcher = document.querySelector<HTMLButtonElement>('#map-switcher')!;
+const landArrow = document.querySelector<HTMLButtonElement>('#land-arrow')!;
+const landOverlay = document.querySelector<HTMLElement>('#land-overlay')!;
+const landMessage = document.querySelector<HTMLParagraphElement>('#land-message')!;
+const landPurchase = document.querySelector<HTMLButtonElement>('#land-purchase')!;
+const landOpenFields = document.querySelector<HTMLButtonElement>('#land-open-fields')!;
 const playArea = document.querySelector<HTMLElement>('.play-area')!;
-let selectedBuilding: BuildingKind | null = 'stall';
+let selectedBuilding: BuildingKind | null = 'road';
 let currentMap: 'park' | 'strawberry-fields' = 'park';
+let displayedYear = STARTING_YEAR;
+let landUnlocked = false;
 
 function switchMap(map: 'park' | 'strawberry-fields'): void {
+  if (map === 'strawberry-fields' && !landUnlocked) return;
   currentMap = map;
   (game.scene.getScene('ParkScene') as ParkScene).setMap(map);
   const onFields = map === 'strawberry-fields';
@@ -155,8 +294,56 @@ function switchMap(map: 'park' | 'strawberry-fields'): void {
   playArea.setAttribute('aria-label', onFields ? 'Erdbeerfelder' : 'Parkkarte');
 }
 
+function updateLandAccess(unlocked: boolean): void {
+  landUnlocked = unlocked;
+  mapSwitcher.disabled = !unlocked;
+  landPurchase.hidden = unlocked;
+  landOpenFields.hidden = !unlocked;
+  landMessage.textContent = unlocked
+    ? 'Das Gelände gehört jetzt zu deinem Erlebnisdorf.'
+    : '';
+  landArrow.setAttribute(
+    'aria-label',
+    unlocked ? 'Erdbeerfelder öffnen' : 'Land kaufen öffnen',
+  );
+  const selectedCategory = document
+    .querySelector<HTMLButtonElement>('.category-tab.is-selected')
+    ?.dataset.category as BuildingCategory | undefined;
+  if (selectedCategory) showCategory(selectedCategory);
+}
+
 mapSwitcher.addEventListener('click', () => {
   switchMap(currentMap === 'park' ? 'strawberry-fields' : 'park');
+});
+landArrow.addEventListener('click', () => {
+  landMessage.textContent = landUnlocked
+    ? 'Das Gelände gehört jetzt zu deinem Erlebnisdorf.'
+    : '';
+  landOverlay.hidden = false;
+  if (landUnlocked) landOpenFields.focus();
+  else landPurchase.focus();
+});
+document.querySelector<HTMLButtonElement>('#land-close')!.addEventListener('click', () => {
+  landOverlay.hidden = true;
+  landArrow.focus();
+});
+landOverlay.addEventListener('click', (event) => {
+  if (event.target === landOverlay) landOverlay.hidden = true;
+});
+landPurchase.addEventListener('click', () => {
+  const scene = game.scene.getScene('ParkScene') as ParkScene;
+  const result = scene.purchaseStrawberryFields();
+  if (result === 'insufficient-funds') {
+    landMessage.textContent =
+      `Nicht genug Vermögen. Benötigt werden ${formatMoney(STRAWBERRY_FIELDS_LAND_COST)}.`;
+    return;
+  }
+  updateLandAccess(scene.hasStrawberryFieldsUnlocked());
+  landOverlay.hidden = true;
+});
+landOpenFields.addEventListener('click', () => {
+  switchMap('strawberry-fields');
+  landOverlay.hidden = true;
 });
 
 function selectBuilding(kind: BuildingKind | null): void {
@@ -164,7 +351,7 @@ function selectBuilding(kind: BuildingKind | null): void {
   buildingOptions
     .querySelectorAll<HTMLButtonElement>('.building-option')
     .forEach((button) => {
-      const selected = button.dataset.building === kind;
+      const selected = kind !== null && button.dataset.building === kind;
       button.classList.toggle('is-selected', selected);
       button.setAttribute('aria-pressed', String(selected));
     });
@@ -184,21 +371,61 @@ function showCategory(category: BuildingCategory): void {
   buildingOptions.replaceChildren();
   buildingOptions.setAttribute('aria-label', `Gebäude in ${category}`);
   const items = catalog[category];
-  if (!items.some((item) => item.kind === selectedBuilding)) {
-    selectedBuilding = items[0]!.kind;
+  if (
+    !items.some(
+      (item) =>
+        item.kind === selectedBuilding &&
+        item.implemented &&
+        item.kind !== null &&
+        isBuildingUnlocked(item.kind, displayedYear) &&
+        (item.kind !== 'strawberry-field' || landUnlocked),
+    )
+  ) {
+    selectedBuilding =
+      items.find(
+        (item) =>
+          item.kind !== null &&
+          item.implemented &&
+          isBuildingUnlocked(item.kind, displayedYear) &&
+          (item.kind !== 'strawberry-field' || landUnlocked),
+      )?.kind ?? null;
   }
   for (const item of items) {
     const button = document.createElement('button');
     button.className = 'building-option';
     button.type = 'button';
-    button.dataset.building = item.kind;
-    const constructionCost = BUILDING_ECONOMY[item.kind].constructionCost;
+    button.dataset.catalogItem = item.id;
+    if (item.kind) button.dataset.building = item.kind;
+    const constructionCost = item.kind
+      ? BUILDING_ECONOMY[item.kind].constructionCost
+      : null;
+    const unlocked = item.kind
+      ? isBuildingUnlocked(item.kind, displayedYear)
+      : item.availableFromYear <= displayedYear;
+    button.disabled = !item.implemented || !unlocked;
+    const availabilityText = !item.implemented
+      ? `In Planung · ab ${item.availableFromYear}`
+      : unlocked
+        ? formatMoney(constructionCost!)
+        : `Ab ${item.availableFromYear}`;
+    const landRequired =
+      item.kind === 'strawberry-field' && !landUnlocked;
+    if (landRequired) {
+      button.disabled = true;
+    }
     button.setAttribute(
       'aria-label',
-      `${item.label}, ${item.size} Felder, ${constructionCost.toLocaleString('de-DE')} Euro Baukosten`,
+      `${item.label}, ${item.size} Felder, ${
+        landRequired ? 'Landkauf erforderlich' : availabilityText
+      }`,
     );
-    button.setAttribute('aria-pressed', String(item.kind === selectedBuilding));
-    button.title = `${item.label} · ${item.size} Felder · ${constructionCost.toLocaleString('de-DE')} €`;
+    button.setAttribute(
+      'aria-pressed',
+      String(item.kind !== null && item.kind === selectedBuilding),
+    );
+    button.title = `${item.label} · ${item.size} Felder · ${
+      landRequired ? 'Landkauf erforderlich' : availabilityText
+    }`;
     if (item.kind === selectedBuilding) button.classList.add('is-selected');
 
     const icon = document.createElement('span');
@@ -213,12 +440,23 @@ function showCategory(category: BuildingCategory): void {
     size.textContent = item.size;
     const cost = document.createElement('span');
     cost.className = 'building-cost';
-    cost.textContent = `${constructionCost.toLocaleString('de-DE')} €`;
+    cost.textContent = landRequired ? 'Land kaufen' : availabilityText;
     button.append(icon, label, size, cost);
-    button.addEventListener('click', () => selectBuilding(item.kind));
+    if (item.kind && item.implemented && !landRequired) {
+      button.addEventListener('click', () => selectBuilding(item.kind));
+    }
     buildingOptions.append(button);
   }
   selectBuilding(selectedBuilding);
+}
+
+function updateBuildingAvailability(year: number): void {
+  if (displayedYear === year) return;
+  displayedYear = year;
+  const category = document
+    .querySelector<HTMLButtonElement>('.category-tab.is-selected')
+    ?.dataset.category as BuildingCategory | undefined;
+  if (category) showCategory(category);
 }
 
 document
@@ -228,12 +466,12 @@ document
       showCategory(button.dataset.category as BuildingCategory),
     );
   });
-showCategory('gastro');
+showCategory('sonstiges');
 
 window.addEventListener('park:insufficient-capital', (event) => {
   const { cost } = (event as CustomEvent<{ cost: number }>).detail;
   const buildHint = document.querySelector<HTMLSpanElement>('#build-hint')!;
-  buildHint.textContent = `Nicht genug Kapital · benötigt ${cost.toLocaleString('de-DE')} €`;
+  buildHint.textContent = `Nicht genug Vermögen · benötigt ${formatMoney(cost)}`;
   window.setTimeout(() => {
     buildHint.textContent = 'Karte antippen zum Platzieren';
   }, 2500);
@@ -274,10 +512,11 @@ function startNewVillage(): void {
   switchMap('park');
   const scene = game.scene.getScene('ParkScene') as ParkScene;
   scene.resetPark();
+  updateLandAccess(false);
   scene.startGame();
-  showCategory('gastro');
+  showCategory('sonstiges');
   gameStarted = true;
-  mapSwitcher.disabled = false;
+  landArrow.disabled = false;
   saveGameButton.disabled = false;
   saveStatus.textContent = '';
   menuOverlay.hidden = true;
@@ -329,6 +568,7 @@ loadGameButton.addEventListener('click', () => {
       return;
     }
     switchMap('park');
+    updateLandAccess(scene.hasStrawberryFieldsUnlocked());
     const selectedBuilding = scene.getSaveSnapshot().selectedBuilding;
     const category = Object.entries(catalog).find(([, items]) =>
       items.some((item) => item.kind === selectedBuilding),
@@ -342,7 +582,7 @@ loadGameButton.addEventListener('click', () => {
     }
     scene.startGame();
     gameStarted = true;
-    mapSwitcher.disabled = false;
+    landArrow.disabled = false;
     saveGameButton.disabled = false;
     saveStatus.textContent = 'Spielstand geladen.';
     menuOverlay.hidden = true;
@@ -365,6 +605,11 @@ document
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || !gameStarted) return;
   event.preventDefault();
+  if (!landOverlay.hidden) {
+    landOverlay.hidden = true;
+    landArrow.focus();
+    return;
+  }
   if (menuOverlay.hidden) openPauseMenu();
   else {
     menuOverlay.hidden = true;

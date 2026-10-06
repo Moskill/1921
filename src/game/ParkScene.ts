@@ -12,7 +12,9 @@ import {
 } from '../simulation/park';
 import {
   BUILDING_ECONOMY,
+  isBuildingUnlocked,
   ParkSimulation,
+  STRAWBERRY_FIELDS_LAND_COST,
   type ParkSimulationSave,
   type ParkSimulationSnapshot,
 } from '../simulation/game';
@@ -33,6 +35,7 @@ export type ParkSaveSnapshot = {
   buildings: { id: number; tile: Tile; kind: BuildingKind }[];
   fieldBuildings?: { id: number; tile: Tile; kind: BuildingKind }[];
   selectedBuilding: BuildingKind | null;
+  strawberryFieldsUnlocked?: boolean;
   camera: { scrollX: number; scrollY: number; zoom: number };
   simulation: ParkSimulationSave;
 };
@@ -64,6 +67,7 @@ export class ParkScene extends Phaser.Scene {
   private park = new Park();
   private strawberryFields = new Park();
   private currentMap: 'park' | 'strawberry-fields' = 'park';
+  private strawberryFieldsUnlocked = false;
   private simulation = new ParkSimulation();
   private simulationEnabled = false;
   private hudUpdateElapsed = 0;
@@ -80,7 +84,7 @@ export class ParkScene extends Phaser.Scene {
   private visitorTween?: Phaser.Tweens.Tween;
   private visitorRespawn?: Phaser.Time.TimerEvent;
   private hover?: Phaser.GameObjects.Graphics;
-  private selectedBuilding: BuildingKind | null = 'stall';
+  private selectedBuilding: BuildingKind | null = 'road';
   private dragStart?: {
     x: number;
     y: number;
@@ -223,6 +227,7 @@ export class ParkScene extends Phaser.Scene {
   }
 
   setMap(map: 'park' | 'strawberry-fields'): void {
+    if (map === 'strawberry-fields' && !this.strawberryFieldsUnlocked) return;
     if (map === this.currentMap) return;
     this.currentMap = map;
     this.dragStart = undefined;
@@ -244,6 +249,7 @@ export class ParkScene extends Phaser.Scene {
     this.park = new Park();
     this.strawberryFields = new Park();
     this.currentMap = 'park';
+    this.strawberryFieldsUnlocked = false;
     this.simulation.reset();
     this.updateBuildingEconomy();
     this.resetVisitor();
@@ -256,6 +262,20 @@ export class ParkScene extends Phaser.Scene {
     this.drawBuildings();
     window.dispatchEvent(new CustomEvent('park:placed', { detail: 0 }));
     this.dispatchSimulationUpdate();
+  }
+
+  hasStrawberryFieldsUnlocked(): boolean {
+    return this.strawberryFieldsUnlocked;
+  }
+
+  purchaseStrawberryFields(): 'purchased' | 'already-owned' | 'insufficient-funds' {
+    if (this.strawberryFieldsUnlocked) return 'already-owned';
+    if (!this.simulation.trySpend(STRAWBERRY_FIELDS_LAND_COST)) {
+      return 'insufficient-funds';
+    }
+    this.strawberryFieldsUnlocked = true;
+    this.dispatchSimulationUpdate();
+    return 'purchased';
   }
 
   getSaveSnapshot(): ParkSaveSnapshot {
@@ -271,6 +291,7 @@ export class ParkScene extends Phaser.Scene {
         tile: { ...building.tile },
       })),
       selectedBuilding: this.selectedBuilding,
+      strawberryFieldsUnlocked: this.strawberryFieldsUnlocked,
       camera: {
         scrollX: this.cameras.main.scrollX,
         scrollY: this.cameras.main.scrollY,
@@ -289,6 +310,8 @@ export class ParkScene extends Phaser.Scene {
       !Array.isArray(save.buildings) ||
       (save.selectedBuilding !== null &&
         typeof save.selectedBuilding !== 'string') ||
+      (save.strawberryFieldsUnlocked !== undefined &&
+        typeof save.strawberryFieldsUnlocked !== 'boolean') ||
       !save.camera ||
       !save.simulation
     ) {
@@ -338,6 +361,8 @@ export class ParkScene extends Phaser.Scene {
     this.park = restoredPark;
     this.strawberryFields = restoredFields;
     this.currentMap = 'park';
+    this.strawberryFieldsUnlocked =
+      save.strawberryFieldsUnlocked ?? fieldBuildings.length > 0;
     this.simulation.loadSaveState(save.simulation);
     this.selectedBuilding = save.selectedBuilding as BuildingKind | null;
     this.cameras.main.setZoom(save.camera.zoom);
@@ -358,6 +383,10 @@ export class ParkScene extends Phaser.Scene {
   private place(tile: Tile): void {
     const kind = this.selectedBuilding;
     if (!kind || !this.activePark.canPlace(tile, kind)) return;
+    if (kind === 'strawberry-field' && this.currentMap !== 'strawberry-fields') {
+      return;
+    }
+    if (!isBuildingUnlocked(kind, this.simulation.getYear())) return;
     const constructionCost = BUILDING_ECONOMY[kind].constructionCost;
     if (!this.simulation.trySpend(constructionCost)) {
       window.dispatchEvent(
@@ -707,8 +736,6 @@ export class ParkScene extends Phaser.Scene {
         );
         continue;
       }
-      g.fillStyle(0x3c5632, 0.28);
-      g.fillEllipse(x + 9, y + 10, 76, 24);
       const base = [
         {
           x: ORIGIN_X + (building.tile.column - building.tile.row) * HALF_W,
@@ -741,6 +768,40 @@ export class ParkScene extends Phaser.Scene {
             (building.tile.column + building.tile.row + rows) * HALF_H,
         },
       ];
+      if (building.kind === 'strawberry-field') {
+        g.fillStyle(0x8b6842);
+        g.fillPoints(base, true);
+        g.lineStyle(3, 0x604b35, 0.9);
+        for (let row = 1; row < rows; row++) {
+          const start = {
+            x: base[0]!.x + ((base[3]!.x - base[0]!.x) * row) / rows,
+            y: base[0]!.y + ((base[3]!.y - base[0]!.y) * row) / rows,
+          };
+          const end = {
+            x: base[1]!.x + ((base[2]!.x - base[1]!.x) * row) / rows,
+            y: base[1]!.y + ((base[2]!.y - base[1]!.y) * row) / rows,
+          };
+          g.lineBetween(start.x, start.y, end.x, end.y);
+          for (let column = 1; column < columns; column++) {
+            const fraction = column / columns;
+            g.fillStyle(0x3f7540);
+            g.fillCircle(
+              start.x + (end.x - start.x) * fraction,
+              start.y + (end.y - start.y) * fraction - 3,
+              5,
+            );
+            g.fillStyle(0xc9473e);
+            g.fillCircle(
+              start.x + (end.x - start.x) * fraction + 2,
+              start.y + (end.y - start.y) * fraction - 6,
+              2.5,
+            );
+          }
+        }
+        continue;
+      }
+      g.fillStyle(0x3c5632, 0.28);
+      g.fillEllipse(x + 9, y + 10, 76, 24);
       const roof = base.map((point) => ({ x: point.x, y: point.y - 49 }));
       if (building.kind === 'pavilion') {
         g.fillStyle(0xf0d8ad);
@@ -751,16 +812,32 @@ export class ParkScene extends Phaser.Scene {
         g.strokePoints(roof, true);
         continue;
       }
-      g.fillStyle(0xf0d5a5);
+      g.fillStyle(building.kind === 'barn' ? 0xd67d62 : 0xf0d5a5);
       g.fillPoints([base[0]!, base[1]!, roof[1]!, roof[0]!], true);
-      g.fillStyle(0xd0a875);
+      g.fillStyle(building.kind === 'barn' ? 0xb95242 : 0xd0a875);
       g.fillPoints([base[1]!, base[2]!, roof[2]!, roof[1]!], true);
-      g.fillStyle(0xb94838);
+      g.fillStyle(
+        building.kind === 'barn'
+          ? 0x8e302d
+          : building.kind === 'tool-shed'
+            ? 0x795235
+            : 0xb94838,
+      );
       g.fillPoints(roof, true);
-      g.lineStyle(2, 0x8b332c, 0.75);
+      g.lineStyle(2, building.kind === 'tool-shed' ? 0x513c2d : 0x8b332c, 0.75);
       g.strokePoints(roof, true);
-      g.fillStyle(0x704b37);
-      g.fillRect(x - 5, y - 18, 10, 18);
+      g.fillStyle(building.kind === 'barn' ? 0x71382f : 0x704b37);
+      g.fillRect(x - (building.kind === 'barn' ? 12 : 7), y - 25, building.kind === 'barn' ? 24 : 14, 25);
+      if (building.kind === 'tool-shed') {
+        g.lineStyle(2, 0xe1c18d, 0.9);
+        g.lineBetween(x - 7, y - 25, x + 7, y);
+        g.lineBetween(x + 7, y - 25, x - 7, y);
+      }
+      if (building.kind === 'barn') {
+        g.lineStyle(3, 0xf0d0a0, 0.9);
+        g.lineBetween(x - 12, y - 25, x, y - 6);
+        g.lineBetween(x, y - 6, x + 12, y - 25);
+      }
       if (building.kind === 'stall') {
         g.fillStyle(0xf5d577);
         g.fillCircle(x - 8, y - 29, 3);
