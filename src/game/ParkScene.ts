@@ -107,6 +107,7 @@ export class ParkScene extends Phaser.Scene {
     this.load.image('shooting-gallery', '/schiessbude-1.webp');
     this.load.image('restroom', '/toilette-1.webp');
     this.load.image('litter-bin', '/muelleimer-.1.webp');
+    this.load.image('strawberry-field', '/erdbeer-feld-1.webp');
     this.load.image('straight-road', '/weg-gerade-2.webp');
     this.load.image('straight-road-reverse', '/weg-gerade-3.webp');
     this.load.image('road-plus', '/weg-1.png');
@@ -716,6 +717,17 @@ export class ParkScene extends Phaser.Scene {
         this.buildingImages?.add(image);
         continue;
       }
+      if (building.kind === 'strawberry-field') {
+        this.buildingImages?.add(
+          this.add
+            .image(x, y, 'strawberry-field')
+            .setDisplaySize(
+              (columns + rows) * HALF_W,
+              (columns + rows) * HALF_H,
+            ),
+        );
+        continue;
+      }
       if (building.kind === 'road-plus') {
         this.buildingImages?.add(
           this.add
@@ -768,38 +780,6 @@ export class ParkScene extends Phaser.Scene {
             (building.tile.column + building.tile.row + rows) * HALF_H,
         },
       ];
-      if (building.kind === 'strawberry-field') {
-        g.fillStyle(0x8b6842);
-        g.fillPoints(base, true);
-        g.lineStyle(3, 0x604b35, 0.9);
-        for (let row = 1; row < rows; row++) {
-          const start = {
-            x: base[0]!.x + ((base[3]!.x - base[0]!.x) * row) / rows,
-            y: base[0]!.y + ((base[3]!.y - base[0]!.y) * row) / rows,
-          };
-          const end = {
-            x: base[1]!.x + ((base[2]!.x - base[1]!.x) * row) / rows,
-            y: base[1]!.y + ((base[2]!.y - base[1]!.y) * row) / rows,
-          };
-          g.lineBetween(start.x, start.y, end.x, end.y);
-          for (let column = 1; column < columns; column++) {
-            const fraction = column / columns;
-            g.fillStyle(0x3f7540);
-            g.fillCircle(
-              start.x + (end.x - start.x) * fraction,
-              start.y + (end.y - start.y) * fraction - 3,
-              5,
-            );
-            g.fillStyle(0xc9473e);
-            g.fillCircle(
-              start.x + (end.x - start.x) * fraction + 2,
-              start.y + (end.y - start.y) * fraction - 6,
-              2.5,
-            );
-          }
-        }
-        continue;
-      }
       g.fillStyle(0x3c5632, 0.28);
       g.fillEllipse(x + 9, y + 10, 76, 24);
       const roof = base.map((point) => ({ x: point.x, y: point.y - 49 }));

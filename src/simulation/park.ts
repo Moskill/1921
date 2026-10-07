@@ -26,7 +26,7 @@ export const BUILDING_FOOTPRINTS: Record<BuildingKind, Footprint> = {
   'shooting-gallery': { columns: 2, rows: 1 },
   'tool-shed': { columns: 2, rows: 2 },
   barn: { columns: 3, rows: 2 },
-  'strawberry-field': { columns: 3, rows: 3 },
+  'strawberry-field': { columns: 4, rows: 4 },
   road: { columns: 1, rows: 1 },
   'road-plus': { columns: 1, rows: 1 },
 };

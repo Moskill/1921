@@ -55,7 +55,9 @@ describe('Park', () => {
     expect(
       park.place({ column: 5, row: 0 }, 'strawberry-field'),
     ).not.toBeNull();
-    expect(park.place({ column: 7, row: 2 }, 'restroom')).toBeNull();
+    expect(park.place({ column: 8, row: 3 }, 'restroom')).toBeNull();
+    expect(park.place({ column: 33, row: 0 }, 'strawberry-field')).toBeNull();
+    expect(park.place({ column: 9, row: 4 }, 'restroom')).not.toBeNull();
   });
 
   it('allows visitors only on open built-in and placed paths', () => {

@@ -82,7 +82,7 @@ const catalog: Record<
       kind: 'strawberry-field',
       label: 'Erdbeerfeld',
       icon: '🍓',
-      size: '3 x 3',
+      size: '4 x 4',
       availableFromYear: STARTING_YEAR,
       implemented: true,
     },

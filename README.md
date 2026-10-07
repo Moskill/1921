@@ -1,6 +1,6 @@
 # Erlebnispark – Prototyp
 
-Mobile-first-Grundlage für ein 2D-Erlebnisparkspiel: TypeScript, Phaser 3, Vite und PWA. Der aktuelle Stand zeigt eine isometrische Parkkarte mit Wegen, Bäumen und Marktständen mit sichtbarer Tiefe. Tippen/Klicken setzt einen Stand, Ziehen bewegt die Karte, die Schaltflächen und das Mausrad zoomen. Die Simulation liegt unabhängig von Phaser in `src/simulation`.
+Mobile-first-Grundlage für ein 2D-Erlebnisparkspiel: TypeScript, Phaser 3, Vite und PWA. Der aktuelle Stand zeigt eine isometrische Parkkarte mit Wegen, Bäumen und Marktständen mit sichtbarer Tiefe. Erdbeerfelder werden mit ihrer Grafik aus `public/erdbeer-feld-1.webp` auf einer Fläche von 4 × 4 Plätzen dargestellt. Tippen/Klicken setzt ein Gebäude, Ziehen bewegt die Karte, die Schaltflächen und das Mausrad zoomen. Die Simulation liegt unabhängig von Phaser in `src/simulation`.
 
 ## Start
 
